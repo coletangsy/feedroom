@@ -1,8 +1,8 @@
 """Collect dated article cards from Anthropic's News and Research pages.
 
 Anthropic currently renders these pages as HTML rather than exposing a stable
-RSS feed.  The parser intentionally uses only article links that contain a
-visible ``time`` element.  It therefore covers the cards rendered on the
+RSS feed. The parser uses dates attached to title links or their enclosing
+cards. It therefore covers the cards rendered on the
 current page and does not attempt to discover pagination or JavaScript-only
 results.
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import html
 import urllib.parse
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
@@ -78,6 +78,7 @@ class _Node:
     headings: list[str] = field(default_factory=list)
     titled: list[str] = field(default_factory=list)
     paragraphs: list[str] = field(default_factory=list)
+    links: list[_Node] = field(default_factory=list)
 
     @property
     def text(self) -> str:
@@ -121,13 +122,21 @@ class _ListingParser(_StackParser):
     def __init__(self) -> None:
         super().__init__()
         self.anchors: list[_Node] = []
+        self.cards: list[_Node] = []
 
     def _finish(self, node: _Node) -> None:
         active_anchors = [candidate for candidate in self.nodes if candidate.tag == "a"]
+        containing_cards = [candidate for candidate in self.nodes if candidate.tag in {"article", "li", "tr"}]
         if node.tag == "time":
             value = (node.attrs.get("datetime", ""), node.text)
-            for anchor in active_anchors:
-                anchor.times.append(value)
+            for container in (*active_anchors, *containing_cards):
+                container.times.append(value)
+        elif node.tag == "a":
+            if _title_class(node.attrs.get("class", "")) or any(parent.tag in {"h1", "h2", "h3", "h4", "h5", "h6"} for parent in self.nodes):
+                node.titled.append(node.text)
+            self.anchors.append(node)
+            for card in containing_cards:
+                card.links.append(node)
         elif node.tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
             for anchor in active_anchors:
                 anchor.headings.append(node.text)
@@ -139,8 +148,11 @@ class _ListingParser(_StackParser):
         elif node.tag == "p":
             for anchor in active_anchors:
                 anchor.paragraphs.append(node.text)
-        elif node.tag == "a":
-            self.anchors.append(node)
+            if "description" in node.attrs.get("class", "").lower():
+                for card in containing_cards:
+                    card.paragraphs.append(node.text)
+        elif node.tag in {"article", "li", "tr"} and node.times and node.links:
+            self.cards.append(node)
 
 
 class _ArticleParser(_StackParser):
@@ -268,7 +280,16 @@ def anthropic_entries(url: str, fetch: Fetch) -> list[dict[str, str]]:
     parser.close()
     cards: list[tuple[str, _Node, str, str]] = []
     seen_urls: set[str] = set()
-    for card in parser.anchors:
+    dated_links = list(parser.anchors)
+    for card in parser.cards:
+        links = [(link, _article_url(url, link.attrs.get("href", ""), section)) for link in card.links]
+        titled = {target: link for link, target in links if target and (link.headings or link.titled)}
+        if len(titled) == 1:
+            target, link = next(iter(titled.items()))
+            linked_paragraphs = [paragraph for sibling, href in links if href == target for paragraph in sibling.paragraphs]
+            paragraphs = list(dict.fromkeys([*linked_paragraphs, *card.paragraphs]))
+            dated_links.append(replace(link, times=link.times or card.times, paragraphs=paragraphs))
+    for card in dated_links:
         article_url = _article_url(url, card.attrs.get("href", ""), section)
         published_at = _card_date(card)
         title = _card_title(card)

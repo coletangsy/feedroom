@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "feedroom"
+version = "0.1.0"
+description = "Daily AI and data-science story collection and Threads publishing"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["trafilatura>=2,<3"]
+
+[project.optional-dependencies]
+r2 = ["boto3>=1.37,<2"]
+
+[project.scripts]
+feedroom = "feedroom.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["feedroom"]
+
+[tool.setuptools.package-data]
+feedroom = ["prompts/*.md"]

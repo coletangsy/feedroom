@@ -1,32 +1,34 @@
-# Feedloom Architecture
+# Feedroom Architecture
 
 ## Purpose and boundary
 
-Feedloom is a collector-only repository for a daily AI and data-science briefing. The collector gathers and normalizes candidate stories; a separate Codex task selects and formats a briefing from that JSON. Collection and selection are deliberately separate so an unavailable source or incomplete window remains visible.
+Feedroom is an installable Python package for a daily AI and data-science briefing. The collector gathers and normalizes candidate stories. The CLI can preview the collection or select one sourced story for Threads. The deployment scheduler owns the daily trigger.
 
 ## Data flow
 
 ```text
 RSS / official pages / lists / release feeds
                  ↓
-scripts/ai_news_collect.py + source helpers
+feedroom collect + source helpers
                  ↓
 candidate JSON (latest / reading + collection_errors)
                  ↓
-briefing task selects a bounded set
+event groups → bounded article evidence → OpenRouter writer → validation
                  ↓
-optional explicitly authorized Gmail delivery
+preview JSON or explicit Threads publish
                  ↓
-selected IDs marked in state/ai_news_seen.json
+account journal in SQLite or R2
 ```
 
-`scripts/anthropic_sources.py` and `scripts/uber_sources.py` contain source-specific extraction. `scripts/ai_news_collect.py` owns the time windows, normalization, topic/depth signals, deduplication, error collection, and `--mark-seen` state update. Tests under `tests/` cover collector behavior and source parsing.
+`feedroom/collector.py` owns the time windows, normalization, topic and depth signals, deduplication, and per-source errors. The source modules hold Anthropic and Uber extraction. The legacy `scripts/ai_news_collect.py` entry point still supports the 14-day seen file for manual briefings.
 
-The `latest` lane uses a short recent window; the `reading` lane looks back farther but requires depth signals. The collector does not promise complete historical coverage, and a single source error should not discard usable candidates. Candidate IDs are the only input the downstream briefing selection may use.
+The `latest` lane uses a 36-hour window. The `reading` lane looks back 90 days and contains only Hugging Face Daily Papers with at least 100 upvotes. Shortlist extraction honors the configured source hosts, robots rules, per-host pacing, and a two-MB page cap. It keeps usable snippets when full text is unavailable. Collection logs partial TLDR issue or paper-week failures.
+
+The writer receives a bounded list of events and excerpts with ephemeral IDs. It returns a headline, facts, and practical assessment in Hong Kong Cantonese. The validator checks the selection, known Simplified Chinese forms, figures, formatting, and Threads length before resolving the URL from the original candidate. A failed validation gets one revision attempt. The publishing journal also records alternate item and title IDs from the selected event.
 
 ## Delivery boundary
 
-- Preview and draft work reads candidates only and does not send mail or mark items seen.
-- Gmail is used only when a user or existing task explicitly authorizes a specified recipient. Delivery must be confirmed before selected IDs are recorded.
-- `state/ai_news_seen.json` is runtime state and stays out of Git.
-- Validate source maintenance with `python3 -m unittest discover -s tests -v`; inspect coverage notes when a source is rate-limited or unavailable.
+- Source preview runs without credentials. Editorial preview and posting require the OpenRouter key and model. Editorial preview produces a draft without Threads credentials or journal access. On-demand long-form editorial previews use the briefing skill.
+- `feedroom publish` verifies the Threads account and conditionally claims the Hong Kong run date. The journal retains the candidate and title IDs for cross-day deduplication.
+- The job saves the media container ID before calling publish and conditionally records `publishing` before the external write. A later run checks the existing container and records the recovered post ID when it can identify the original post. An unresolved result holds further publishing. Duplicate container creation under contention is safe because only the recorded container may be published.
+- Local Docker uses a named volume with SQLite. Cloudflare starts the same image from a scheduled Worker and keeps its journal on private R2 using conditional object writes. Preview is the default mode for both.

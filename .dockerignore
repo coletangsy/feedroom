@@ -1,0 +1,7 @@
+**
+!Dockerfile
+!pyproject.toml
+!README.md
+!feedroom/
+!feedroom/**
+**/__pycache__

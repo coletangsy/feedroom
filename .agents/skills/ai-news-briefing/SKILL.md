@@ -1,6 +1,6 @@
 ---
 name: ai-news-briefing
-description: Produce or preview Feedloom's Traditional Chinese AI and data-science briefing from its collector JSON, including recent news and older worthwhile reading. Use for daily briefing runs, candidate selection, and briefing-quality reviews in this repository.
+description: Draft or review Feedroom's Traditional Chinese AI and data-science briefing from collector JSON. Use for on-demand editorial previews and briefing-quality reviews.
 ---
 
 # AI news briefing
@@ -11,14 +11,14 @@ Surface current AI and data-science developments plus older material that is sti
 
 ## Collect
 
-Run commands from the Feedloom repository root. For a new briefing, collect candidates into a unique temporary directory:
+Run commands from the repository root. For a new preview, collect candidates into a unique temporary directory:
 
 ```sh
-briefing_dir=$(mktemp -d "${TMPDIR:-/tmp}/feedloom-briefing.XXXXXX")
+briefing_dir=$(mktemp -d "${TMPDIR:-/tmp}/feedroom-briefing.XXXXXX")
 python3 scripts/ai_news_collect.py --state state/ai_news_seen.json > "$briefing_dir/candidates.json"
 ```
 
-Reuse the supplied JSON when reviewing or previewing an existing collection. Collection reads the seen state but does not mark candidates as delivered. See [README.md](../../../README.md) for collector options; do not change sources, windows, or schedules as part of an ordinary briefing.
+Reuse the supplied JSON when reviewing or previewing an existing collection. Collection reads the legacy seen state. Preserve sources, windows, and schedules during editorial work. The [README](../../../README.md) covers the independent daily job.
 
 Inspect `candidates`, `collection_errors`, and `collected_at` before selecting. A zero exit status does not mean every source succeeded. If the command fails or produces invalid JSON, report the collection failure and leave state untouched. If some sources fail, continue with supported candidates and add a short coverage note. If nothing is selected and errors exist, report incomplete collection instead of `[SILENT]`; do not claim there was no news.
 
@@ -67,18 +67,6 @@ Otherwise use this structure:
 
 Under 最新動態, use only helpful groups when needed: 模型與研究、開發工具與平台、產品與企業動態、安全、政策與治理、資料科學與 MLOps、值得留意但未確認. The last group must state the uncertainty plainly. Keep 值得閱讀 as its own section and explain its durable value rather than pretending it is breaking news.
 
-## Delivery and seen state
+## Return the draft
 
-Default to replying in the current task. A preview, draft, quality review, or maintenance task must not send email or update seen state. Use email only when the user or existing task instructions authorize it and specify the recipient; do not infer a recipient or alter delivery settings.
-
-Before a normal task reply, finish and check the briefing, then write only the selected candidates' exact `id` values to `$briefing_dir/selected-ids.json` as `{"selected_ids": ["..."]}` and run:
-
-```sh
-python3 scripts/ai_news_collect.py --mark-seen "$briefing_dir/selected-ids.json" --state state/ai_news_seen.json
-```
-
-Mark only selected IDs and confirm success; report failed state updates. State expires after 14 days. Task replies have no post-delivery callback: marking immediately before replying may suppress items if delivery fails, until their entries are removed or expire. Never clear the entire state to retry a briefing. Do not commit during briefing runs.
-
-For authorized Gmail delivery, send the completed briefing as inline UTF-8 HTML using the available tool's schema. If the tool exposes these fields, use `payload.mime_type: "text/html"`, `payload.charset: "utf-8"`, and HTML in `payload.body.content`. Use semantic HTML (`h1`, `h2`, `ol`, `li`, `strong`, `a`), escape story text and link attributes, and do not set an attachment filename or disposition. Never use `text/markdown` for email.
-
-After sending, read the sent message and confirm a nonempty HTML body and root MIME type of `text/html` or `multipart/alternative`. Mark selected IDs only after confirmed email delivery. If sending fails or verification is unavailable or fails, report the actual delivery status, leave state unchanged, and do not automatically resend an ambiguously delivered message.
+Reply with the draft in the current task. Editorial previews, quality reviews, and maintenance leave the delivery state untouched. The scheduled CLI owns Threads publication and its journal.

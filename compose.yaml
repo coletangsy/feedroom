@@ -1,0 +1,17 @@
+services:
+  feedroom:
+    build: .
+    environment:
+      - OPENROUTER_API_KEY
+      - OPENROUTER_MODEL
+      - THREADS_ACCESS_TOKEN
+      - THREADS_ACCOUNT_ID
+      - FEEDROOM_R2_ACCOUNT_ID
+      - FEEDROOM_R2_BUCKET
+      - FEEDROOM_R2_ACCESS_KEY_ID
+      - FEEDROOM_R2_SECRET_ACCESS_KEY
+    volumes:
+      - threads-state:/data
+
+volumes:
+  threads-state:

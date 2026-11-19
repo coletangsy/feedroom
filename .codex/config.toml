@@ -1,4 +1,4 @@
-# Preauthorize the scheduled briefing send in this trusted project.
+# Gmail tool approval for explicitly requested manual sends.
 # Retain both tool-name forms for connector naming compatibility.
 [apps.connector_2128aebfecb84f64a069897515042a44.tools."gmail.send_email"]
 enabled = true
