@@ -13,6 +13,23 @@ Feedroom 每天為指定 Threads 帳戶整理一篇 AI 與資料科學摘要。�
 
 首則標題的原文網址用作 Threads 連結附件。預覽 JSON 的 `draft.source_urls` 和發佈紀錄會依標題順序保存每項對應的原文網址。 [Threads 連結附件](https://developers.facebook.com/documentation/threads/posts#links)
 
+## 架構
+
+```mermaid
+flowchart TD
+    Local["本機 Docker Compose<br/>手動執行或主機排程"] --> CLI["Feedroom CLI"]
+    Cloud["Cloudflare Cron<br/>容器（選用）"] --> CLI
+    CLI --> Collect["收集、評分及去重"]
+    Sources["RSS、官方文章、論文與 releases"] --> Collect
+    Collect --> Group["候選項目及事件分組"]
+    Group -->|來源標題| Preview["預覽 JSON"]
+    Group -->|來源證據| Write["OpenRouter 撰稿<br/>標題與字數驗證"]
+    Write -->|編輯預覽| Preview
+    Write -->|發佈| Publish["Threads 發佈及復原"]
+    Publish -->|讀寫發佈紀錄| Journal[("SQLite（本機）<br/>R2（選用）")]
+    Publish --> Post["Threads 帖文<br/>香港日期與最多六則標題"]
+```
+
 ## 本機 Docker
 
 在運行每日摘要的電腦安裝 Docker 和 Compose v2。在 repo 根目錄建立本機 `.env`、建置映像，並先看一次來源預覽。Git 會忽略 `.env`。 [.env.example](.env.example)
