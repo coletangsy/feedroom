@@ -2,7 +2,7 @@ import json
 from urllib.parse import quote
 import unittest
 
-from scripts.uber_sources import UberSourceError, uber_entries
+from feedroom.uber_sources import UberSourceError, uber_entries
 
 
 LISTING_URL = "https://www.uber.com/us/en/blog/engineering/?uber_client_name=784"

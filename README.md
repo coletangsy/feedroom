@@ -1,6 +1,6 @@
-# Feedloom
+# Feedroom
 
-一個內容蒐集器：每天蒐集近期高訊號的 AI 與資料科學動態，也挑出不限新舊、值得真正讀完的內容。正常結果會由 Codex 的每日自動化回覆在此任務；收集沒有回報錯誤，而且兩條線都沒有合格內容時，只回覆 `[SILENT]`。若來源收集出錯，摘要會註明涵蓋範圍不完整；沒有可選內容時則回報收集問題。
+Feedroom 蒐集 AI 與資料科學動態，供手動預覽或每日發佈到 Threads。每日工作由本機 Docker 主機排程或 Cloudflare Cron Trigger 啟動。
 
 ## Maintainer Documentation
 
@@ -10,9 +10,9 @@
 
 ## 設計
 
-`scripts/ai_news_collect.py` 只做可重跑的蒐集、正規化、初步評分與去重，並輸出 JSON。候選會標成 `latest` 或 `reading`：前者使用 36 小時窗口，後者從同一批 RSS／TLDR 來源回看 90 天，並要求分析、研究、實作或其他深度訊號。Hacker News 與 GitHub releases 維持近期窗口，避免放大例行更新。
+`feedroom collect` 蒐集、正規化、評分同去重，並輸出 JSON。`latest` 收錄最近 36 小時的新聞、文章同 releases。`reading` 從 Hugging Face Daily Papers 回看 90 日，只收錄至少 100 個 upvote 的論文，並連到原文摘要。收集會排除參考時間之後發佈的內容。 [Hugging Face Daily Papers API](https://huggingface.co/docs/huggingface_hub/main/en/package_reference/hf_api#huggingface_hub.HfApi.list_daily_papers)
 
-摘要 agent 只可根據該 JSON 選出最多十則，通常保留一至五則最新動態，再加一至兩則值得閱讀的內容；不足時不硬湊數量，不得以即時搜尋補資料。
+撰稿前先合併標題相近的同一事件，再嘗試補讀候選的文章正文。補讀限於已配置的公開來源網域，遵守 `robots.txt`，遇到封鎖或正文太短就沿用摘要。OpenRouter 從證據中挑最多一件事，以香港粵語寫背景、事實同對讀者的影響。程式核對事件 ID、數字、格式同長度，再加上原文連結。
 
 官方研究與新聞來源：
 
@@ -28,27 +28,53 @@
 
 另有 Hugging Face RSS、AWS Machine Learning Blog、Databricks、PyTorch、NVIDIA Blog、TLDR AI（會展開為原文連結）、MIT Technology Review AI、The Verge AI、TechCrunch AI、Hacker News Algolia 與指定 GitHub releases。
 
-企業工程文章仍須符合 AI、資料科學、資料工程、推薦系統或實驗等主題，舊文章另須具備研究或深度閱讀訊號。重疊來源依原文網址或相同標題去重。90 天是可接受的回看窗口，實際涵蓋範圍受各 feed／列表頁提供的文章數限制，不代表完整歷史索引。單一來源錯誤會記錄在 `collection_errors`，不會阻止其餘來源繼續執行。
+企業工程文章仍須符合 AI、資料科學、資料工程、推薦系統或實驗等主題。重疊來源依原文網址或相同標題去重。實際涵蓋範圍受來源提供的文章數限制。單一來源或論文週次出錯會記錄在 `collection_errors`，其餘來源繼續收集。
 
-## 本機使用
+## 安裝與預覽
 
 ```sh
-python3 scripts/ai_news_collect.py --state state/ai_news_seen.json > /tmp/ai-news-candidates.json
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install .
+feedroom collect > /tmp/ai-news-candidates.json
+feedroom preview --candidates /tmp/ai-news-candidates.json
+feedroom preview --editorial --candidates /tmp/ai-news-candidates.json
 python3 -m unittest discover -s tests -v
+node --test tests/cloudflare.test.mjs
 ```
 
-可用 `--reading-lookback-days N` 調整值得閱讀的回看窗口；預設為 90 天。
+套件支援 Python 3.11 或以上。`feedroom preview` 預設係免憑證的來源預覽，可即場收集或讀取既有 JSON。加 `--editorial` 可預覽正式帖文，會用 `OPENROUTER_API_KEY` 同 `OPENROUTER_MODEL` 呼叫 OpenRouter。模型需支援結構化輸出。兩種預覽都毋須 Threads token。`collect` 或 `preview` 可用 `--as-of` 指定參考時間，歷史可見範圍仍取決於來源網站。完整 Python 測試需安裝 `python -m pip install '.[r2]'`。 [OpenRouter 結構化輸出](https://openrouter.ai/docs/guides/features/structured-outputs)
 
-若已選出要推送的項目，把其 `id` 寫進 JSON，例如 `{"selected_ids": ["..."]}`，然後執行：
+原有 `python3 scripts/ai_news_collect.py` 指令仍可使用。它的 `--mark-seen` 只管理舊有手動摘要的 14 日紀錄。
+
+## Threads 發佈
+
+在 Meta 建立 Threads App，用 tester 帳戶做首次驗證，授權 `threads_basic` 同 `threads_content_publish`，並將該帳戶的數字 ID 填入 `THREADS_ACCOUNT_ID`。將 Threads User Access Token 存入 `THREADS_ACCESS_TOKEN`。長效 token 有效期為 60 日，由操作者在到期前用 Meta 的 `refresh_access_token` 刷新並更新部署 secret。 [Meta Threads 開始使用](https://developers.facebook.com/documentation/threads/get-started) · [發佈權限](https://developers.facebook.com/documentation/threads/posts)
+
+`feedroom publish` 會先核對 token 帳戶，再用 OpenRouter 草擬並驗證最多一帖。有效草稿建立 Threads container 時會加上 Meta 的 AI 標籤，並在 container 就緒後提交發佈。無合適項目會跳過，模型或驗證出錯會回報失敗。同一帳戶的歷史紀錄保留原文及合併來源的 ID，已發佈的論文會先排除，再補足閱讀候選。若失去發佈回應，重跑會先查原 container，再分頁核對貼文。狀態仍不明時會暫停新發佈。 [Meta 發佈](https://developers.facebook.com/documentation/threads/posts) · [Meta 發佈狀態](https://developers.facebook.com/documentation/threads/troubleshooting)
+
+### 本機 Docker
+
+在目標電腦 clone repo，安裝 Docker 同 Compose v2，並確認排程帳戶可以啟動容器及連接外部來源。工作需要主機在排程時間開機，Docker 服務亦要已啟動。先從 `.env.example` 建立本機 `.env`，以個人憑證填入 OpenRouter 同 Threads 設定。
 
 ```sh
-python3 scripts/ai_news_collect.py --mark-seen /tmp/selected-ids.json --state state/ai_news_seen.json
+docker compose build
+docker compose run --rm feedroom preview
+docker compose run --rm feedroom preview --editorial
 ```
 
-state 保留最近 14 天的已推送項目。因 Codex 的回覆交付後沒有可執行的 callback，排程會在產生最終報告前記錄已選項；若交付本身失敗，可刪除相應 state 項目讓下次重試。
+確認編輯預覽後，可用 `docker compose run --rm feedroom publish` 對已授權的目標帳戶試帖。試帖查核完成後，由主機排程每日呼叫 Compose，並將輸出接駁到排程紀錄。UTC 主機如要保留 08:00 HKT，cron 可用以下設定。使用其他主機時區時要換算時間，並將路徑改為實際 checkout 路徑。
 
-預覽、草稿與品質檢視只讀取候選，不寄信，也不執行 `--mark-seen`。只有使用者或既有任務明確授權並指定收件者時才使用 Gmail，寄送 inline HTML，確認交付後才記錄已選項。完整的選材、交付與失敗處理規則見 [ai-news-briefing skill](.agents/skills/ai-news-briefing/SKILL.md)。
+```cron
+0 0 * * * cd "/absolute/path/to/feedroom" && "/absolute/path/to/docker" compose --env-file .env run --rm feedroom publish
+```
 
-## 排程
+Compose 用 `threads-state` volume 保存 `/data/threads.sqlite3`。備份此 volume 後才做主機搬遷。若已計劃搬上 Cloudflare，可在首次正式發佈前設定下列四個 R2 變數，讓本機同 Cloudflare 沿用同一份紀錄。
 
-此 repo 由目前 Codex 任務的每日 08:00 HKT heartbeat 使用。排程提示會讀取 `.agents/skills/ai-news-briefing/SKILL.md`，因此品質規則不依賴模型記憶或即時瀏覽。
+### Cloudflare
+
+`cloudflare.config.ts` 使用 Cloudflare Containers 同 Cron Triggers，設定為每日 08:00 HKT。部署需 Cloudflare Workers Paid、Docker 同 Node.js 24.22 或同系列更新版本。執行 `npm ci` 安裝本專案指定的 Cloudflare CLI，再用 `npx cf build` 檢查建置。`npx cf deploy` 的排程預設跑 `preview`。 [Cloudflare CLI](https://developers.cloudflare.com/cf/projects/) · [Cloudflare 排程容器](https://developers.cloudflare.com/containers/examples/cron/)
+
+正式發佈前，準備私人 R2 bucket 同只限該 bucket 的 Object Read & Write 憑證。在 Cloudflare 控制台的 Worker Settings → Variables and Secrets 設定 `OPENROUTER_API_KEY`、`OPENROUTER_MODEL`、`THREADS_ACCOUNT_ID`、`THREADS_ACCESS_TOKEN`、`FEEDROOM_R2_ACCOUNT_ID`、`FEEDROOM_R2_BUCKET`、`FEEDROOM_R2_ACCESS_KEY_ID`、`FEEDROOM_R2_SECRET_ACCESS_KEY`，再用 `npx cf deploy --mode publish` 部署。發佈歷史寫入 `threads/<Threads account ID>.json`，跨容器休眠保留。 [Worker secrets](https://developers.cloudflare.com/workers/configuration/secrets/) · [R2 憑證](https://developers.cloudflare.com/r2/api/tokens/) · [Cloudflare 部署模式](https://developers.cloudflare.com/cf/projects/)
+
+切換正式排程前，先停用原有 Codex heartbeat 或其他舊觸發器。搬遷已發帖的帳戶時，先處理未確認的發佈，並確認新環境讀到同一份歷史。若本機已有 SQLite 發佈紀錄，先備份和遷移歷史，避免以空白 R2 紀錄重開同一帳戶的排程。

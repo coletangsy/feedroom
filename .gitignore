@@ -2,3 +2,16 @@ __pycache__/
 *.py[cod]
 .DS_Store
 state/*.json
+state/*.sqlite3*
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+.wrangler/
+.cloudflare/
+node_modules/
+.venv/
+build/
+dist/
+*.egg-info/

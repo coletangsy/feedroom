@@ -1,6 +1,7 @@
 import unittest
+from unittest.mock import Mock
 
-from scripts.anthropic_sources import AnthropicSourceError, anthropic_entries
+from feedroom.anthropic_sources import AnthropicSourceError, anthropic_entries
 
 
 NEWS_PAGE = """
@@ -22,6 +23,27 @@ NEWS_PAGE = """
 
 
 class AnthropicSourceTests(unittest.TestCase):
+    def test_date_in_card_header_applies_to_the_sibling_title_link(self):
+        listing = """<article><header><a href='/news/category'>News</a><time>Nov 19, 2026</time></header>
+        <a href='/news/sibling' aria-hidden='true'><img src='/cover.png'></a>
+        <a href='/news/sibling' class='card-title-link'><h3>An inference update</h3></a>
+        <a href='/news/sibling'><p>The company released an update.</p></a></article>"""
+
+        self.assertEqual(anthropic_entries("https://www.anthropic.com/news", lambda _: listing), [{
+            "title": "An inference update", "url": "https://www.anthropic.com/news/sibling",
+            "summary": "The company released an update.", "published_at": "2026-11-19",
+        }])
+
+    def test_research_heading_wraps_title_link_and_summary_is_beside_it(self):
+        listing = """<article><header><p><a href='/research/team/alignment'>Alignment</a></p><time>Nov 17, 2026</time></header>
+        <h3><a href='/research/study'>New inference results</a></h3>
+        <p class='card metaDescription'>The study compares inference settings.</p></article>"""
+        fetch = Mock(return_value=listing)
+        entries = anthropic_entries("https://www.anthropic.com/research", fetch)
+        self.assertEqual(entries[0]["summary"], "The study compares inference settings.")
+        self.assertEqual(entries[0]["url"], "https://www.anthropic.com/research/study")
+        fetch.assert_called_once()
+
     def test_news_uses_visible_dated_cards_and_deduplicates_links(self):
         calls = []
 

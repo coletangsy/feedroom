@@ -1,4 +1,4 @@
-# Feedloom instructions
+# Feedroom instructions
 
 ## Browser and computer use
 
@@ -6,20 +6,18 @@
 - Open research tabs, search, navigate, and read public sources without asking for routine confirmation. Use browser interaction directly when needed; do not require a failed web-reader attempt first.
 - Follow the tools' permission requirements for consequential actions. This research authorization does not expand the task to sending messages, purchases, or account/security changes.
 
-## Unattended AI briefing runs
+## AI briefing
 
-For unattended briefing runs, read `.agents/skills/ai-news-briefing/SKILL.md` before producing an answer.
+Use `feedroom preview` to inspect collected candidates and `feedroom preview --editorial` to generate an editorial draft.
 
-- Run the collector first and use only its JSON candidates.
-- Do not browse for extra stories or invent missing details.
-- Follow the skill's selection and delivery rules: up to ten items, without filling a quota; previews do not send or update seen state.
-- Keep `state/ai_news_seen.json` out of git.
-- Do not commit during a daily run; source and state changes are manual maintenance work.
-- TLDR AI is expanded into its linked original stories; sponsor entries are excluded. Validate source maintenance with `python3 -m unittest discover -s tests -v`.
+- Use collector JSON as the source of briefing facts. Previews only produce drafts.
+- The deployment environment owns the daily trigger. Follow the [README](README.md) for the standalone CLI, scheduler, and Threads publishing controls.
+- Keep runtime journals and credentials out of Git. Use fixtures and a mocked Threads client for automated checks.
+- Run `python3 -m unittest discover -s tests -v` for Python changes and `node --test tests/cloudflare.test.mjs` for Cloudflare scheduler changes.
 
 ## Documentation
 
 - [README](README.md) is the collector design and operator workflow entry point.
 - [ARCHITECTURE.md](ARCHITECTURE.md) describes candidate collection, selection, delivery, and seen-state boundaries.
 - [CHANGELOG.md](CHANGELOG.md) records delivered behavior and documentation changes.
-- Update `ARCHITECTURE.md` when sources, candidate fields, selection limits, delivery permissions, or seen-state handling changes. Update `CHANGELOG.md` for user-visible or workflow-significant changes.
+- Update `ARCHITECTURE.md` when sources, candidate fields, selection limits, scheduling, delivery permissions, or seen-state handling changes. Update `CHANGELOG.md` for user-visible or workflow-significant changes.

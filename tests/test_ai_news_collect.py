@@ -1,20 +1,22 @@
 from datetime import UTC, datetime, timedelta
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from scripts.ai_news_collect import (
+from feedroom.collector import (
     FEEDS,
     TLDR_AI_FEED,
     canonical_url,
     collect,
     hn_entries,
     load_state,
+    paper_candidates,
     save_seen,
     score_item,
     score_reading_item,
-    section_for,
+    tldr_entries,
     tldr_issue_entries,
 )
 
@@ -37,6 +39,17 @@ class NewsCollectorTests(unittest.TestCase):
 
         self.assertEqual(entries, [{"title": "New AI model", "url": "https://example.com/story", "summary": "A useful summary."}])
 
+    def test_tldr_keeps_articles_from_successful_issues_after_a_timeout(self):
+        now = datetime.now(UTC)
+        issues = [{"url": f"https://tldr.tech/ai/{day}", "published_at": now.isoformat()} for day in ("first", "second")]
+        html = b'<article><a class="font-bold" href="https://example.com/story"><h3>AI model</h3></a><div class="newsletter-html">Summary</div></article>'
+        errors = []
+        with patch("feedroom.collector.feed_entries", return_value=issues), patch("feedroom.collector.fetch", side_effect=[TimeoutError("timed out"), html]):
+            entries = tldr_entries(now - timedelta(days=1), errors)
+
+        self.assertEqual([entry["url"] for entry in entries], ["https://example.com/story"])
+        self.assertEqual([error["source"] for error in errors], ["TLDR AI"])
+
     def test_canonical_url_drops_tracking_but_keeps_meaningful_query(self):
         self.assertEqual(
             canonical_url("https://Example.com/post/?utm_source=x&model=gpt#section"),
@@ -54,7 +67,7 @@ class NewsCollectorTests(unittest.TestCase):
 
     def test_hn_uses_popularity_ranked_search_for_recent_stories(self):
         payload = b'{"hits": [{"title": "New AI model", "url": "https://example.com/", "points": 300, "num_comments": 100, "created_at": "2026-08-12T01:00:00Z", "objectID": "1"}]}'
-        with patch("scripts.ai_news_collect.fetch", return_value=payload) as fetch:
+        with patch("feedroom.collector.fetch", return_value=payload) as fetch:
             entries = hn_entries(datetime(2026, 8, 12, tzinfo=UTC))
 
         url = fetch.call_args.args[0]
@@ -88,32 +101,50 @@ class NewsCollectorTests(unittest.TestCase):
             )
         )
 
-    def test_section_for_keeps_recent_items_in_latest(self):
-        now = datetime(2026, 8, 12, tzinfo=UTC)
-        latest_cutoff = now - timedelta(hours=36)
-        reading_cutoff = now - timedelta(days=30)
-
-        self.assertEqual(section_for(now - timedelta(hours=1), latest_cutoff, reading_cutoff, 6), "latest")
-        self.assertEqual(section_for(now - timedelta(days=3), latest_cutoff, reading_cutoff, 6), "reading")
-        self.assertIsNone(section_for(now - timedelta(days=3), latest_cutoff, reading_cutoff, None))
-
-    def test_collect_returns_recent_and_older_reading_candidates(self):
+    def test_only_popular_daily_papers_can_enter_reading(self):
         now = datetime.now(UTC)
         entries = {
             "OpenAI": [
                 {"title": "New AI model release", "url": "https://example.com/latest", "summary": "A new API model release.", "published_at": (now - timedelta(hours=1)).isoformat()},
                 {"title": "A deep dive into LLM evaluation", "url": "https://example.com/reading", "summary": "Research lessons from a benchmark study.", "published_at": (now - timedelta(days=3)).isoformat()},
+                {"title": "Future AI model release", "url": "https://example.com/future", "summary": "A new model.", "published_at": (now + timedelta(hours=1)).isoformat()},
             ],
         }
 
         def feed_entries(feed):
             return entries.get(feed.name, [])
 
+        paper = {"id": "2609.12345", "title": "Paper on model inference", "summary": "Research on inference.",
+                 "publishedAt": (now - timedelta(days=3)).isoformat(), "upvotes": 112}
+        rows = [paper, {**paper, "id": "2609.12346", "upvotes": 99},
+                {**paper, "id": "2609.12347", "publishedAt": (now + timedelta(days=1)).isoformat()}]
         with TemporaryDirectory() as directory:
-            with patch("scripts.ai_news_collect.feed_entries", side_effect=feed_entries), patch("scripts.ai_news_collect.tldr_entries", return_value=[]), patch("scripts.ai_news_collect.hn_entries", return_value=[]), patch("scripts.ai_news_collect.github_entries", return_value=[]):
-                result = collect(Path(directory) / "seen.json", lookback_hours=36, max_items=10, reading_lookback_days=30)
+            with patch("feedroom.collector.feed_entries", side_effect=feed_entries), patch("feedroom.collector.tldr_entries", return_value=[]), patch("feedroom.collector.hn_entries", return_value=[]), patch("feedroom.collector.github_entries", return_value=[]), patch("feedroom.collector.fetch", return_value=json.dumps([{"paper": row} for row in rows]).encode()):
+                result = collect(Path(directory) / "seen.json", lookback_hours=36, max_items=10, reading_lookback_days=30, as_of=now)
 
         self.assertEqual([item["section"] for item in result["candidates"]], ["latest", "reading"])
+        self.assertEqual(result["candidates"][1]["url"], "https://arxiv.org/abs/2609.12345")
+        self.assertEqual(result["candidates"][1]["upvotes"], 112)
+
+    def test_a_failed_paper_week_preserves_other_weeks(self):
+        cutoff = datetime(2026, 9, 6, tzinfo=UTC)
+        now = cutoff + timedelta(days=1)
+        paper = {"id": "2609.12345", "title": "Research on inference", "summary": "A method.",
+                 "publishedAt": now.isoformat(), "upvotes": 112}
+        errors = []
+        with patch("feedroom.collector.fetch", side_effect=[TimeoutError("timed out"), json.dumps([{"paper": paper}]).encode()]):
+            result = paper_candidates(cutoff, now, errors)
+        self.assertEqual(result[0]["upvotes"], 112)
+        self.assertEqual(len(errors), 1)
+
+    def test_malformed_story_url_does_not_stop_collection(self):
+        entry = {"title": "AI model release", "url": "https://example.com/release", "summary": "A new API model release.", "published_at": datetime.now(UTC).isoformat()}
+        entries = [{**entry, "url": "https://[invalid.example/story"}, entry]
+        with TemporaryDirectory() as directory:
+            with patch("feedroom.collector.feed_entries", return_value=entries), patch("feedroom.collector.tldr_entries", return_value=[]), patch("feedroom.collector.hn_entries", return_value=[]), patch("feedroom.collector.github_entries", return_value=[]), patch("feedroom.collector.paper_candidates", return_value=[]):
+                result = collect(Path(directory) / "seen.json", 36, 40)
+
+        self.assertEqual([item["url"] for item in result["candidates"]], [entry["url"]])
 
     def test_seen_state_expires_after_two_weeks(self):
         now = datetime.now(UTC)
@@ -130,7 +161,7 @@ class NewsCollectorTests(unittest.TestCase):
             {"title": "New AI research findings", "url": "https://example.com/study/", "summary": "Research findings.", "published_at": published},
         ]
         with TemporaryDirectory() as directory:
-            with patch("scripts.ai_news_collect.feed_entries", return_value=entries), patch("scripts.ai_news_collect.tldr_entries", return_value=[]), patch("scripts.ai_news_collect.hn_entries", return_value=[]), patch("scripts.ai_news_collect.github_entries", return_value=[]):
+            with patch("feedroom.collector.feed_entries", return_value=entries), patch("feedroom.collector.tldr_entries", return_value=[]), patch("feedroom.collector.hn_entries", return_value=[]), patch("feedroom.collector.github_entries", return_value=[]), patch("feedroom.collector.paper_candidates", return_value=[]):
                 result = collect(Path(directory) / "seen.json", 36, 40)
         self.assertEqual(len(result["candidates"]), 1)
 
@@ -157,7 +188,7 @@ class NewsCollectorTests(unittest.TestCase):
         dates = ("2026-09-04", "2026-09-03", "2026-09-04T00:00:00Z", "2026-09-04T13:00:00Z")
         entries = [{"title": f"Claude announcement {index}", "url": f"https://example.com/{index}", "summary": "Claude is available.", "published_at": value} for index, value in enumerate(dates)]
         with TemporaryDirectory() as directory:
-            with patch("scripts.ai_news_collect.datetime", MorningRun), patch("scripts.ai_news_collect.feed_entries", return_value=entries), patch("scripts.ai_news_collect.tldr_entries", return_value=[]), patch("scripts.ai_news_collect.hn_entries", return_value=[]), patch("scripts.ai_news_collect.github_entries", return_value=[]):
+            with patch("feedroom.collector.datetime", MorningRun), patch("feedroom.collector.feed_entries", return_value=entries), patch("feedroom.collector.tldr_entries", return_value=[]), patch("feedroom.collector.hn_entries", return_value=[]), patch("feedroom.collector.github_entries", return_value=[]), patch("feedroom.collector.paper_candidates", return_value=[]):
                 result = collect(Path(directory) / "seen.json", 36, 40)
         self.assertEqual({item["published_at"] for item in result["candidates"]}, {"2026-09-04", "2026-09-04T13:00:00Z"})
         self.assertTrue(all(item["section"] == "latest" for item in result["candidates"]))
