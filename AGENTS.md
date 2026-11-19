@@ -8,7 +8,7 @@
 
 ## AI briefing
 
-Use the [AI briefing skill](.agents/skills/ai-news-briefing/SKILL.md) for on-demand editorial previews and candidate quality reviews.
+Use `feedroom preview` to inspect collected candidates and `feedroom preview --editorial` to generate an editorial draft.
 
 - Use collector JSON as the source of briefing facts. Previews only produce drafts.
 - The deployment environment owns the daily trigger. Follow the [README](README.md) for the standalone CLI, scheduler, and Threads publishing controls.

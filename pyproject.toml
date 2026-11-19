@@ -17,7 +17,7 @@ r2 = ["boto3>=1.37,<2"]
 feedroom = "feedroom.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["feedroom"]
+include = ["feedroom", "feedroom.prompts"]
 
 [tool.setuptools.package-data]
 feedroom = ["prompts/*.md"]

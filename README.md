@@ -12,7 +12,7 @@ Feedroom 蒐集 AI 與資料科學動態，供手動預覽或每日發佈到 Thr
 
 `feedroom collect` 蒐集、正規化、評分同去重，並輸出 JSON。`latest` 收錄最近 36 小時的新聞、文章同 releases。`reading` 從 Hugging Face Daily Papers 回看 90 日，只收錄至少 100 個 upvote 的論文，並連到原文摘要。收集會排除參考時間之後發佈的內容。 [Hugging Face Daily Papers API](https://huggingface.co/docs/huggingface_hub/main/en/package_reference/hf_api#huggingface_hub.HfApi.list_daily_papers)
 
-撰稿前先合併標題相近的同一事件，再嘗試補讀候選的文章正文。補讀限於已配置的公開來源網域，遵守 `robots.txt`，遇到封鎖或正文太短就沿用摘要。OpenRouter 從證據中挑最多一件事，以香港粵語寫背景、事實同對讀者的影響。程式核對事件 ID、數字、格式同長度，再加上原文連結。需要較完整的手動摘要時，可按 [AI briefing skill](.agents/skills/ai-news-briefing/SKILL.md) 用候選 JSON 撰寫。
+撰稿前先合併標題相近的同一事件，再嘗試補讀候選的文章正文。補讀限於已配置的公開來源網域，遵守 `robots.txt`，遇到封鎖或正文太短就沿用摘要。OpenRouter 從證據中挑最多一件事，以香港粵語寫背景、事實同對讀者的影響。程式核對事件 ID、數字、格式同長度，再加上原文連結。
 
 官方研究與新聞來源：
 
@@ -51,7 +51,7 @@ node --test tests/cloudflare.test.mjs
 
 在 Meta 建立 Threads App，用 tester 帳戶做首次驗證，授權 `threads_basic` 同 `threads_content_publish`，並將該帳戶的數字 ID 填入 `THREADS_ACCOUNT_ID`。將 Threads User Access Token 存入 `THREADS_ACCESS_TOKEN`。長效 token 有效期為 60 日，由操作者在到期前用 Meta 的 `refresh_access_token` 刷新並更新部署 secret。 [Meta Threads 開始使用](https://developers.facebook.com/documentation/threads/get-started) · [發佈權限](https://developers.facebook.com/documentation/threads/posts)
 
-`feedroom publish` 會先核對 token 帳戶，再用 OpenRouter 草擬並驗證最多一帖。有效草稿建立 Threads container 時會加上 Meta 的 AI 標籤。無合適項目會跳過，模型或驗證出錯會回報失敗。同一帳戶的歷史紀錄保留原文及合併來源的 ID。若失去發佈回應，重跑會先查原 container。狀態仍不明時會暫停新發佈。 [Meta 發佈](https://developers.facebook.com/documentation/threads/posts) · [Meta 發佈狀態](https://developers.facebook.com/documentation/threads/troubleshooting)
+`feedroom publish` 會先核對 token 帳戶，再用 OpenRouter 草擬並驗證最多一帖。有效草稿建立 Threads container 時會加上 Meta 的 AI 標籤，並在 container 就緒後提交發佈。無合適項目會跳過，模型或驗證出錯會回報失敗。同一帳戶的歷史紀錄保留原文及合併來源的 ID，已發佈的論文會先排除，再補足閱讀候選。若失去發佈回應，重跑會先查原 container，再分頁核對貼文。狀態仍不明時會暫停新發佈。 [Meta 發佈](https://developers.facebook.com/documentation/threads/posts) · [Meta 發佈狀態](https://developers.facebook.com/documentation/threads/troubleshooting)
 
 ### 本機 Docker
 
