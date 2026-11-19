@@ -1,12 +1,11 @@
 """Coordinate a single public post per account and Hong Kong run day."""
 
 from dataclasses import asdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from time import sleep
 
+from .briefing import HKT
 from .threads import ThreadsError
-
-HKT = timezone(timedelta(hours=8), "HKT")
 
 
 def wait_for_container(threads, container_id: str) -> str:
@@ -31,7 +30,7 @@ def deliver(journal, threads, collect, now: datetime, *, write) -> dict:
             post = posts[pending]
             status = threads.status(post["container_id"])
             if status == "PUBLISHED":
-                post_id = threads.find_post(post["text"], post["prepared_at"])
+                post_id = threads.find_post(post["text"], post["prepared_at"], link_attachment=post.get("source_url"))
                 if journal.write({**posts, pending: {**post, "status": "published", "post_id": post_id}}, revision):
                     return {"status": "reconciled", "day": pending, "post_id": post_id}
             elif status in {"ERROR", "EXPIRED"}:
@@ -53,7 +52,7 @@ def deliver(journal, threads, collect, now: datetime, *, write) -> dict:
                     for key in (post["candidate_id"], post["title_id"], *post.get("related_ids", []))}
             if used != written_for:
                 result = collect(used)
-                draft = write(result, used)
+                draft = write(result, used, day=day)
                 written_for = used
             if draft is None:
                 status = "collection_incomplete" if result["collection_errors"] else "no_story"
@@ -62,7 +61,9 @@ def deliver(journal, threads, collect, now: datetime, *, write) -> dict:
             journal.write({**posts, day: post}, revision)
         elif post["status"] == "claimed":
             # Concurrent starts can create extra containers. Only the saved one can be published.
-            container_id = threads.create(post["text"], made_with_ai=post.get("made_with_ai", False))
+            container_id = threads.create(
+                post["text"], made_with_ai=post.get("made_with_ai", False), link_attachment=post.get("source_url"),
+            )
             journal.write({**posts, day: {**post, "status": "ready", "container_id": container_id}}, revision)
         elif post["status"] == "ready":
             container_id = post["container_id"]
