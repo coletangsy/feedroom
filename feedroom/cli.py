@@ -1,4 +1,4 @@
-"""Run collection, preview, or a daily Threads publication."""
+"""Collect sources, preview, or publish the daily Threads headline digest."""
 
 import argparse
 from dataclasses import asdict
@@ -54,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
         add_arguments(command, replay=name != "publish")
         if name == "preview":
             command.add_argument("--candidates", type=Path, help="Read an existing collector JSON file.")
-            command.add_argument("--editorial", action="store_true", help="Write and validate a Cantonese draft through OpenRouter.")
+            command.add_argument("--editorial", action="store_true", help="Write and validate a Cantonese headline digest through OpenRouter.")
     args = parser.parse_args(argv)
 
     try:

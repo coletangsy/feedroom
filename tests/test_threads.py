@@ -2,6 +2,7 @@ import io
 import json
 import unittest
 from unittest.mock import Mock
+from urllib.parse import parse_qs, urlsplit
 
 from feedroom.threads import Threads, ThreadsError
 
@@ -14,6 +15,31 @@ class ThreadsRecoveryTests(unittest.TestCase):
     def setUp(self):
         self.threads = Threads("synthetic", "11")
         self.threads.opener = Mock()
+
+    def test_create_attaches_the_source_outside_the_post_text(self):
+        text = "2026-11-20\n• 研究團隊發佈新模型"
+        url = "https://example.com/story"
+        self.threads.opener.open.return_value = _response({"id": "22"})
+
+        self.assertEqual(self.threads.create(text, link_attachment=url), "22")
+
+        request = self.threads.opener.open.call_args.args[0]
+        self.assertEqual(parse_qs(request.data.decode()), {
+            "media_type": ["TEXT"], "text": [text], "link_attachment": [url],
+        })
+
+    def test_find_post_uses_the_source_attachment_to_disambiguate_identical_titles(self):
+        text = "2026-11-20\n• 研究團隊發佈新模型"
+        url = "https://example.com/story"
+        self.threads.opener.open.return_value = _response({"data": [
+            {"id": "20", "text": text, "link_attachment_url": "https://example.org/other"},
+            {"id": "33", "text": text, "link_attachment_url": url},
+        ]})
+
+        self.assertEqual(self.threads.find_post(text, "1700000000", link_attachment=url), "33")
+
+        request = self.threads.opener.open.call_args.args[0]
+        self.assertEqual(parse_qs(urlsplit(request.full_url).query)["fields"], ["id,text,link_attachment_url"])
 
     def test_find_post_follows_pagination_until_the_unique_match(self):
         self.threads.opener.open.side_effect = [

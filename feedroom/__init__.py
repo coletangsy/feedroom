@@ -1,1 +1,1 @@
-"""Feedroom collects and publishes sourced AI and data-science news."""
+"""Publish a daily Threads digest of sourced AI and data science headlines."""

@@ -53,10 +53,12 @@ class Threads:
         if actual_id != self.account_id:
             raise ThreadsError("Threads access token does not belong to the configured account.")
 
-    def create(self, text: str, *, made_with_ai: bool = False) -> str:
+    def create(self, text: str, *, made_with_ai: bool = False, link_attachment: str | None = None) -> str:
         fields = {"media_type": "TEXT", "text": text}
         if made_with_ai:
             fields["is_made_with_ai"] = "true"
+        if link_attachment:
+            fields["link_attachment"] = link_attachment
         result = self.request(f"{self.account_id}/threads", fields, method="POST")
         return threads_id(result.get("id"))
 
@@ -67,9 +69,11 @@ class Threads:
     def status(self, container_id: str) -> str:
         return self.request(threads_id(container_id), {"fields": "status"}).get("status", "")
 
-    def find_post(self, text: str, since: str) -> str:
+    def find_post(self, text: str, since: str, *, link_attachment: str | None = None) -> str:
         path = f"{self.account_id}/threads"
         fields = {"fields": "id,text", "since": since, "limit": "25"}
+        if link_attachment:
+            fields["fields"] += ",link_attachment_url"
         seen_cursors = set()
         matches = set()
         for _ in range(MAX_POST_LOOKUP_PAGES):
@@ -77,7 +81,10 @@ class Threads:
             data = result.get("data")
             if not isinstance(data, list) or any(not isinstance(post, dict) for post in data):
                 raise ThreadsError("Threads API returned an invalid post list.")
-            matches.update(threads_id(post.get("id")) for post in data if post.get("text") == text)
+            matches.update(
+                threads_id(post.get("id")) for post in data if post.get("text") == text
+                and (not link_attachment or post.get("link_attachment_url") == link_attachment)
+            )
 
             paging = result.get("paging")
             if paging is None:
