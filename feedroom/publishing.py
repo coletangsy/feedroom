@@ -2,10 +2,21 @@
 
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
+from time import sleep
 
 from .threads import ThreadsError
 
 HKT = timezone(timedelta(hours=8), "HKT")
+
+
+def wait_for_container(threads, container_id: str) -> str:
+    # Give Threads time to process the upload, then poll at most once per minute.
+    for delay in (30, 60, 60, 60, 60):
+        sleep(delay)
+        status = threads.status(container_id)
+        if status != "IN_PROGRESS":
+            return status
+    return "IN_PROGRESS"
 
 
 def deliver(journal, threads, collect, now: datetime, *, write) -> dict:
@@ -38,11 +49,10 @@ def deliver(journal, threads, collect, now: datetime, *, write) -> dict:
 
         post = posts.get(day)
         if post is None:
-            if result is None:
-                result = collect()
             used = {key for post in posts.values() if post["status"] != "failed"
                     for key in (post["candidate_id"], post["title_id"], *post.get("related_ids", []))}
             if used != written_for:
+                result = collect(used)
                 draft = write(result, used)
                 written_for = used
             if draft is None:
@@ -55,9 +65,19 @@ def deliver(journal, threads, collect, now: datetime, *, write) -> dict:
             container_id = threads.create(post["text"], made_with_ai=post.get("made_with_ai", False))
             journal.write({**posts, day: {**post, "status": "ready", "container_id": container_id}}, revision)
         elif post["status"] == "ready":
+            container_id = post["container_id"]
+            status = wait_for_container(threads, container_id)
+            if status in {"ERROR", "EXPIRED"}:
+                if journal.write({**posts, day: {**post, "status": "failed", "reason": status}}, revision):
+                    raise ThreadsError(f"Threads container for {day} ended in {status}.")
+                continue
+            if status != "FINISHED":
+                if journal.read()[1] != revision:
+                    continue
+                raise ThreadsError(f"Threads container for {day} is not ready to publish.")
             if not journal.write({**posts, day: {**post, "status": "publishing"}}, revision):
                 continue
-            post_id = threads.publish(post["container_id"])
+            post_id = threads.publish(container_id)
             for _ in range(12):
                 posts, revision = journal.read()
                 saved = posts[day]

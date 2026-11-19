@@ -15,6 +15,7 @@ import tempfile
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from collections.abc import Set
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
@@ -393,7 +394,10 @@ def selected_ids(path: Path) -> list[str]:
     return values
 
 
-def collect(state_path: Path, lookback_hours: int, max_items: int, reading_lookback_days: int = READING_LOOKBACK_DAYS, *, as_of: datetime | None = None) -> dict[str, Any]:
+def collect(
+    state_path: Path, lookback_hours: int, max_items: int, reading_lookback_days: int = READING_LOOKBACK_DAYS,
+    *, as_of: datetime | None = None, published_ids: Set[str] = frozenset(),
+) -> dict[str, Any]:
     now = as_of or datetime.now(UTC)
     cutoff = now - timedelta(hours=lookback_hours)
     reading_cutoff = now - timedelta(days=reading_lookback_days)
@@ -455,7 +459,10 @@ def collect(state_path: Path, lookback_hours: int, max_items: int, reading_lookb
         known_ids.add(item["id"])
         deduplicated.append(item)
     latest = [item for item in deduplicated if item["section"] == "latest"]
-    reading = [item for item in deduplicated if item["section"] == "reading"][:8]
+    reading = [
+        item for item in deduplicated
+        if item["section"] == "reading" and published_ids.isdisjoint((item["id"], item["title_id"]))
+    ][:8]
     ordered: list[dict[str, Any]] = []
     for index in range(max(len(latest), len(reading))):
         if index < len(latest):
@@ -476,12 +483,13 @@ def add_arguments(parser: argparse.ArgumentParser, *, legacy: bool = False, repl
         parser.add_argument("--mark-seen", type=Path, metavar="JSON")
 
 
-def collect_from_args(args: argparse.Namespace) -> dict[str, Any]:
+def collect_from_args(args: argparse.Namespace, *, published_ids: Set[str] = frozenset()) -> dict[str, Any]:
     value = getattr(args, "as_of", None)
     as_of = parse_date(value)
     if value and as_of is None:
         raise ValueError("--as-of must be an ISO date or timestamp.")
-    return collect(args.state, args.lookback_hours, args.max_items, args.reading_lookback_days, as_of=as_of)
+    return collect(args.state, args.lookback_hours, args.max_items, args.reading_lookback_days,
+                   as_of=as_of, published_ids=published_ids)
 
 
 def main() -> int:

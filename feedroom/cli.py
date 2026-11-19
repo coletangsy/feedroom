@@ -70,7 +70,10 @@ def main(argv: list[str] | None = None) -> int:
             now = datetime.now(UTC)
             threads = Threads(required_env("THREADS_ACCESS_TOKEN"), required_env("THREADS_ACCOUNT_ID"))
             threads.verify_account()
-            output = deliver(open_journal(threads.account_id), threads, lambda: collect_from_args(args), now, write=write_draft)
+            output = deliver(
+                open_journal(threads.account_id), threads,
+                lambda published_ids: collect_from_args(args, published_ids=published_ids), now, write=write_draft,
+            )
         print(json.dumps(output, ensure_ascii=False, indent=2))
         return int(output.get("status") == "collection_incomplete")
     except (OSError, ValueError, KeyError, TypeError, sqlite3.Error, JournalError, ThreadsError, EditorialError) as error:

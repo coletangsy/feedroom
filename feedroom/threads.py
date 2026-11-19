@@ -13,6 +13,9 @@ class ThreadsError(RuntimeError):
     pass
 
 
+MAX_POST_LOOKUP_PAGES = 20
+
+
 def threads_id(value: object) -> str:
     if not isinstance(value, str) or not re.fullmatch(r"[0-9]{1,40}", value):
         raise ThreadsError("Expected a numeric Threads ID.")
@@ -65,8 +68,39 @@ class Threads:
         return self.request(threads_id(container_id), {"fields": "status"}).get("status", "")
 
     def find_post(self, text: str, since: str) -> str:
-        result = self.request(f"{self.account_id}/threads", {"fields": "id,text", "since": since, "limit": "25"})
-        matches = [post for post in result.get("data", []) if post.get("text") == text]
+        path = f"{self.account_id}/threads"
+        fields = {"fields": "id,text", "since": since, "limit": "25"}
+        seen_cursors = set()
+        matches = set()
+        for _ in range(MAX_POST_LOOKUP_PAGES):
+            result = self.request(path, fields)
+            data = result.get("data")
+            if not isinstance(data, list) or any(not isinstance(post, dict) for post in data):
+                raise ThreadsError("Threads API returned an invalid post list.")
+            matches.update(threads_id(post.get("id")) for post in data if post.get("text") == text)
+
+            paging = result.get("paging")
+            if paging is None:
+                break
+            if not isinstance(paging, dict):
+                raise ThreadsError("Threads API returned an invalid pagination response.")
+            cursors = paging.get("cursors", {})
+            if not isinstance(cursors, dict):
+                raise ThreadsError("Threads API returned an invalid pagination response.")
+            after = cursors.get("after")
+            if after in (None, ""):
+                if paging.get("next"):
+                    raise ThreadsError("Threads API returned an invalid pagination response.")
+                break
+            if not isinstance(after, str):
+                raise ThreadsError("Threads API returned an invalid pagination cursor.")
+            if after in seen_cursors:
+                raise ThreadsError("Threads API returned a repeated pagination cursor.")
+            seen_cursors.add(after)
+            fields = {**fields, "after": after}
+        else:
+            raise ThreadsError("Threads post lookup exceeded the pagination limit.")
+
         if len(matches) != 1:
             raise ThreadsError("Container is published, but the original post could not be identified uniquely.")
-        return threads_id(matches[0].get("id"))
+        return matches.pop()
