@@ -30,7 +30,9 @@ def deliver(journal, threads, collect, now: datetime, *, write) -> dict:
             post = posts[pending]
             status = threads.status(post["container_id"])
             if status == "PUBLISHED":
-                post_id = threads.find_post(post["text"], post["prepared_at"], link_attachment=post.get("source_url"))
+                # Older containers used the lead source URL as their link attachment.
+                attachment = post.get("link_attachment", post.get("source_url"))
+                post_id = threads.find_post(post["text"], post["prepared_at"], link_attachment=attachment)
                 if journal.write({**posts, pending: {**post, "status": "published", "post_id": post_id}}, revision):
                     return {"status": "reconciled", "day": pending, "post_id": post_id}
             elif status in {"ERROR", "EXPIRED"}:
@@ -61,10 +63,9 @@ def deliver(journal, threads, collect, now: datetime, *, write) -> dict:
             journal.write({**posts, day: post}, revision)
         elif post["status"] == "claimed":
             # Concurrent starts can create extra containers. Only the saved one can be published.
-            container_id = threads.create(
-                post["text"], made_with_ai=post.get("made_with_ai", False), link_attachment=post.get("source_url"),
-            )
-            journal.write({**posts, day: {**post, "status": "ready", "container_id": container_id}}, revision)
+            container_id = threads.create(post["text"], topic_tag="AI Threads")
+            ready = {**post, "status": "ready", "container_id": container_id, "link_attachment": None}
+            journal.write({**posts, day: ready}, revision)
         elif post["status"] == "ready":
             container_id = post["container_id"]
             status = wait_for_container(threads, container_id)

@@ -16,16 +16,15 @@ class ThreadsRecoveryTests(unittest.TestCase):
         self.threads = Threads("synthetic", "11")
         self.threads.opener = Mock()
 
-    def test_create_attaches_the_source_outside_the_post_text(self):
+    def test_create_sends_the_topic_with_no_link_attachment_or_ai_disclosure(self):
         text = "2026-11-20\n• 研究團隊發佈新模型"
-        url = "https://example.com/story"
         self.threads.opener.open.return_value = _response({"id": "22"})
 
-        self.assertEqual(self.threads.create(text, link_attachment=url), "22")
+        self.assertEqual(self.threads.create(text, topic_tag="AI Threads"), "22")
 
         request = self.threads.opener.open.call_args.args[0]
         self.assertEqual(parse_qs(request.data.decode()), {
-            "media_type": ["TEXT"], "text": [text], "link_attachment": [url],
+            "media_type": ["TEXT"], "text": [text], "topic_tag": ["AI Threads"],
         })
 
     def test_find_post_uses_the_source_attachment_to_disambiguate_identical_titles(self):

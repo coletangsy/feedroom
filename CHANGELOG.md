@@ -11,7 +11,8 @@
 
 ### Changed
 
-- Formatted the daily Threads digest as a Hong Kong date followed by five or six headline bullets when the evidence and post length allow. The lead source is sent as a link attachment. The journal retains each headline's source URL and the deduplication IDs for related coverage.
+- Formatted the daily Threads digest as a Hong Kong date followed by five or six headline bullets when the evidence and post length allow. The journal retains each headline's source URL and the deduplication IDs for related coverage.
+- Added the `AI Threads` topic tag to daily posts and removed the lead link preview and Feedroom's automatic AI self-disclosure.
 
 ### Fixed
 

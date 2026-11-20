@@ -11,7 +11,7 @@ Feedroom 每天為指定 Threads 帳戶整理一篇 AI 與資料科學摘要。�
 • 標題五
 ```
 
-首則標題的原文網址用作 Threads 連結附件。預覽 JSON 的 `draft.source_urls` 和發佈紀錄會依標題順序保存每項對應的原文網址。 [Threads 連結附件](https://developers.facebook.com/documentation/threads/posts#links)
+帖文加上 `AI Threads` 主題標籤。預覽 JSON 的 `draft.source_urls` 和發佈紀錄會依標題順序保存每項對應的原文網址。 [AI Threads 主題](https://www.threads.com/search/?q=aithreads&serp_type=tags&hl=zh-hk) · [Threads 主題標籤](https://developers.facebook.com/documentation/threads/posts#topic-tags)
 
 ## 架構
 
@@ -56,7 +56,7 @@ docker compose run --rm feedroom preview --editorial
 docker compose run --rm feedroom publish
 ```
 
-發佈會先核對 token 帳戶，並以執行當日的香港日期撰稿。草稿通過驗證後，程式建立帶 AI 標籤的 Threads container，待它就緒才發佈。當日已有帖文會回傳 `already_published`，無合適消息則跳過。若發佈回應中斷，重跑會先查原 container 和帳戶帖文。狀態仍不明時會暫停新發佈。 [Meta 發佈流程](https://developers.facebook.com/documentation/threads/posts) · [Meta 發佈狀態](https://developers.facebook.com/documentation/threads/troubleshooting)
+發佈會先核對 token 帳戶，並以執行當日的香港日期撰稿。草稿通過驗證後，程式建立附有主題標籤的純文字 Threads container，省略連結附件與 AI 自我揭露欄位，待它就緒才發佈。Meta 仍可自行加上 AI 標籤。當日已有帖文會回傳 `already_published`，無合適消息則跳過。若發佈回應中斷，重跑會先查原 container 和帳戶帖文。狀態仍不明時會暫停新發佈。 [Meta 發佈流程](https://developers.facebook.com/documentation/threads/posts) · [Meta 發佈狀態](https://developers.facebook.com/documentation/threads/troubleshooting)
 
 ### 每日排程與發佈紀錄
 
