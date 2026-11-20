@@ -53,12 +53,8 @@ class Threads:
         if actual_id != self.account_id:
             raise ThreadsError("Threads access token does not belong to the configured account.")
 
-    def create(self, text: str, *, made_with_ai: bool = False, link_attachment: str | None = None) -> str:
-        fields = {"media_type": "TEXT", "text": text}
-        if made_with_ai:
-            fields["is_made_with_ai"] = "true"
-        if link_attachment:
-            fields["link_attachment"] = link_attachment
+    def create(self, text: str, *, topic_tag: str) -> str:
+        fields = {"media_type": "TEXT", "text": text, "topic_tag": topic_tag}
         result = self.request(f"{self.account_id}/threads", fields, method="POST")
         return threads_id(result.get("id"))
 

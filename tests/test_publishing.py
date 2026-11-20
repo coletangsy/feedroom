@@ -45,9 +45,7 @@ class PublishingTests(unittest.TestCase):
         collect = Mock(return_value={**result(original), "collected_at": "2026-11-19T10:00:00Z"})
         post = deliver(self.journal, self.threads, collect, NOW, write=select_draft)
         self.assertEqual(post, {"status": "published", "day": DAY, "post_id": "33", "collection_errors": []})
-        self.threads.create.assert_called_once_with(
-            f"{DAY}\n• {original['title']}", made_with_ai=False, link_attachment=original["url"],
-        )
+        self.threads.create.assert_called_once_with(f"{DAY}\n• {original['title']}", topic_tag="AI Threads")
 
         reopened = LocalJournal(self.path, "11")
         self.assertEqual(deliver(reopened, self.threads, collect, NOW, write=select_draft)["status"], "already_published")
@@ -68,7 +66,7 @@ class PublishingTests(unittest.TestCase):
         expected_text = "\n".join([DAY, *(f"• {item['title']}" for item in selected)])
         self.assertEqual(published["status"], "published")
         self.assertEqual(self.journal.read()[0][DAY]["source_urls"], [item["url"] for item in selected])
-        self.threads.create.assert_called_once_with(expected_text, made_with_ai=False, link_attachment=lead["url"])
+        self.threads.create.assert_called_once_with(expected_text, topic_tag="AI Threads")
         self.threads.publish.assert_called_once_with("22")
 
         next_day = Mock(return_value=result(alternate, *other_stories[:5]))
@@ -159,7 +157,7 @@ class PublishingTests(unittest.TestCase):
         self.assertEqual(reconciled, {"status": "reconciled", "day": DAY, "post_id": "33"})
         self.threads.status.assert_called_with("22")
         self.threads.find_post.assert_called_once_with(
-            f"{DAY}\n• {original['title']}", str(int(NOW.timestamp())), link_attachment=original["url"],
+            f"{DAY}\n• {original['title']}", str(int(NOW.timestamp())), link_attachment=None,
         )
         self.threads.publish.assert_called_once_with("22")
         (posts, _) = self.journal.read()
@@ -181,24 +179,44 @@ class PublishingTests(unittest.TestCase):
         self.threads.find_post.assert_called_once_with(text, prepared_at, link_attachment=None)
         self.threads.publish.assert_not_called()
 
-    def test_generated_story_persists_aliases_and_marks_the_threads_container(self):
+    def test_reconciles_a_legacy_journal_entry_with_a_link_attachment(self):
+        text = f"{DAY}\n• 模型研究"
+        url = "https://example.com/story"
+        prepared_at = str(int(NOW.timestamp()))
+        self.assertTrue(self.journal.write({DAY: {
+            "status": "publishing", "container_id": "22", "text": text, "prepared_at": prepared_at,
+            "source_url": url,
+        }}, None))
+        self.threads.status.return_value = "PUBLISHED"
+        self.threads.find_post.return_value = "33"
+
+        reconciled = deliver(self.journal, self.threads, Mock(), NOW, write=select_draft)
+
+        self.assertEqual(reconciled["status"], "reconciled")
+        self.threads.find_post.assert_called_once_with(text, prepared_at, link_attachment=url)
+        self.threads.publish.assert_not_called()
+
+    def test_generated_story_keeps_its_sources_and_publishes_with_the_topic(self):
         original = story()
         alternate = story(url="https://mirror.example/story")
         text = f"{DAY}\n• 模型研究"
-        created = Draft(original["id"], original["title_id"], text, (alternate["id"],), True,
-                        source_url=original["url"])
+        created = Draft(original["id"], original["title_id"], text, (alternate["id"],), made_with_ai=True,
+                        source_url=original["url"], source_urls=(original["url"],))
         deliver(self.journal, self.threads, lambda _used: result(original), NOW, write=Mock(return_value=created))
+        saved = self.journal.read()[0][DAY]
+        self.assertEqual(saved["source_urls"], [original["url"]])
+        self.assertTrue(saved["made_with_ai"])
         seen = Mock(return_value=None)
         collect = Mock(return_value=result(alternate))
         deliver(self.journal, self.threads, collect, NOW + timedelta(days=1), write=seen)
         self.assertIn(alternate["id"], collect.call_args.args[0])
         self.assertIn(alternate["id"], seen.call_args.args[1])
-        self.threads.create.assert_called_once_with(text, made_with_ai=True, link_attachment=original["url"])
+        self.threads.create.assert_called_once_with(text, topic_tag="AI Threads")
 
     def test_concurrent_runs_can_only_publish_from_one_saved_container(self):
         ready = Barrier(2, timeout=3)
 
-        def create(text, *, made_with_ai, link_attachment=None):
+        def create(text, *, topic_tag):
             return str(20 + ready.wait())
 
         self.threads.create.side_effect = create
@@ -258,7 +276,7 @@ class PublishingTests(unittest.TestCase):
         threads = Threads("synthetic", "11")
         threads.opener = Mock()
         threads.opener.open.return_value = io.BytesIO(b'{"id":"22"}')
-        self.assertEqual(threads.create("新聞"), "22")
+        self.assertEqual(threads.create("新聞", topic_tag="AI Threads"), "22")
         request = threads.opener.open.call_args.args[0]
         self.assertEqual(request.full_url, "https://graph.threads.com/v1.0/11/threads")
         self.assertEqual(request.get_header("Authorization"), "Bearer synthetic")
