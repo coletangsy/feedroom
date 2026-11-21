@@ -46,6 +46,31 @@ docker compose run --rm feedroom preview
 docker compose run --rm feedroom preview --editorial
 ```
 
+### 圖卡預覽
+
+`preview --cards-dir` 依帖文清單的順序為每則消息輸出一張 1080 × 1350 px PNG。JSON 的 `draft.text` 是香港日期及標題清單，`draft.cards` 包含相同標題、摘要、來源與原文網址，`card_images` 對應由 `01.png` 開始的圖檔。輸出目錄須是新目錄，重跑可另選目錄。
+
+在 Python 環境安裝 `.[cards]` 及 Chromium 後，可用測試資料重播。範例 JSON 收錄五則虛構消息，預覽毋須憑證。
+
+```sh
+python -m pip install '.[cards]'
+python -m playwright install --only-shell chromium
+feedroom preview --candidates tests/fixtures/card_candidates.json --cards-dir build/cards-fixture
+```
+
+來源模式摘錄來源摘要的首一至兩句完整句子。加上 `--editorial` 可用 OpenRouter 撰寫有來源支持的粵語標題及一至兩句圖卡摘要。可用細節不足時會省略摘要，並為已選的標題保留一張卡。
+
+Docker 的 `cards` target 隨附 Chromium 和 Noto CJK 字型。以下使用同一份五則消息的 fixture，並將圖檔寫入本機 `build/`。 [Playwright Docker 文件](https://playwright.dev/python/docs/docker)
+
+```sh
+mkdir -p build
+docker build --target cards -t feedroom-cards .
+docker run --rm --init --ipc=host --network none \
+  --mount "type=bind,source=$PWD/tests/fixtures/card_candidates.json,target=/fixtures/cards.json,readonly" \
+  --mount "type=bind,source=$PWD/build,target=/output" \
+  feedroom-cards preview --candidates /fixtures/cards.json --cards-dir /output/cards-docker
+```
+
 ### Threads 帳戶與試帖
 
 在 Meta 建立 Threads App，用已加入的 tester 帳戶作首次驗證。將該帳戶的數字使用者 ID 填入 `THREADS_ACCOUNT_ID`，並將同一帳戶的長效 Threads User Access Token 填入 `THREADS_ACCESS_TOKEN`。Token 需具備 `threads_basic` 和 `threads_content_publish`。由操作者在到期前用 Meta 的 `refresh_access_token` 更新憑證。 [Meta 開始使用](https://developers.facebook.com/documentation/threads/get-started) · [發佈權限](https://developers.facebook.com/documentation/threads/posts#permissions)

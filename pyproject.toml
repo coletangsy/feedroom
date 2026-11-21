@@ -12,12 +12,13 @@ dependencies = ["trafilatura>=2,<3"]
 
 [project.optional-dependencies]
 r2 = ["boto3>=1.37,<2"]
+cards = ["playwright>=1.65,<1.66"]
 
 [project.scripts]
 feedroom = "feedroom.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["feedroom", "feedroom.prompts"]
+include = ["feedroom", "feedroom.prompts", "feedroom.card_assets"]
 
 [tool.setuptools.package-data]
-feedroom = ["prompts/*.md"]
+feedroom = ["prompts/*.md", "card_assets/*.html", "card_assets/*.css", "card_assets/*.png"]

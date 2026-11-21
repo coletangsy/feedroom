@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added an opt-in preview that renders one 1080 × 1350 news card per selected Threads headline, with a source-grounded summary and a fixture for Docker or local replays.
+
 - Added the `feedroom` Python package and CLI for collection, preview, and daily Threads publishing with account verification and a durable post journal.
 - Added popular papers as a separate reading lane, grouped related source coverage, and added a validated OpenRouter writer for Cantonese Threads posts.
 - Added local Docker and Cloudflare scheduled job configuration and Python, container, and scheduler checks.
