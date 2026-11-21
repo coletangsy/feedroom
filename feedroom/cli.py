@@ -10,7 +10,8 @@ import re
 import sqlite3
 import sys
 
-from .briefing import select_draft
+from .briefing import CardDraft, select_draft
+from .card_render import render_cards
 from .collector import add_arguments, collect_from_args
 from .journal import JournalError, LocalJournal, R2Journal
 from .publishing import deliver
@@ -53,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
         command = commands.add_parser(name)
         add_arguments(command, replay=name != "publish")
         if name == "preview":
+            command.add_argument("--cards-dir", type=Path, help="Render one PNG per selected headline into a new directory.")
             command.add_argument("--candidates", type=Path, help="Read an existing collector JSON file.")
             command.add_argument("--editorial", action="store_true", help="Write and validate a Cantonese headline digest through OpenRouter.")
     args = parser.parse_args(argv)
@@ -61,11 +63,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "collect":
             output = collect_from_args(args)
         elif args.command == "preview":
+            if args.cards_dir is not None and os.path.lexists(args.cards_dir):
+                raise FileExistsError(f"Card output directory already exists: {args.cards_dir}")
             result = json.loads(args.candidates.read_text(encoding="utf-8")) if args.candidates else collect_from_args(args)
             write = write_draft if args.editorial else select_draft
-            draft = write(result, set())
+            draft = write(result, set(), include_cards=args.cards_dir is not None)
             output = {"status": "draft" if draft else "collection_incomplete" if result["collection_errors"] else "no_story",
                       "draft": asdict(draft) if draft else None, "collection_errors": result["collection_errors"]}
+            if args.cards_dir is not None:
+                images = render_cards(draft.cards, args.cards_dir) if isinstance(draft, CardDraft) else ()
+                output["card_images"] = [str(image) for image in images]
         else:
             now = datetime.now(UTC)
             threads = Threads(required_env("THREADS_ACCESS_TOKEN"), required_env("THREADS_ACCOUNT_ID"))

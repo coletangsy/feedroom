@@ -16,7 +16,7 @@ candidate JSON (latest / reading + collection_errors)
 event groups → source titles or bounded article evidence and OpenRouter headlines → validation
                  ↓
 dated post: Hong Kong date + up to six bullets + ordered source URLs and IDs
-                 ├─ preview JSON (no journal or Threads access)
+                 ├─ preview JSON and optional ordered PNG cards (no journal or Threads access)
                  └─ explicit Threads publish → account journal in SQLite or R2
 ```
 
@@ -25,6 +25,12 @@ dated post: Hong Kong date + up to six bullets + ordered source URLs and IDs
 The `latest` lane uses a 36-hour window. The `reading` lane looks back 90 days and contains only Hugging Face Daily Papers with at least 100 upvotes. Shortlist extraction honors the configured source hosts, robots rules, per-host pacing, and a two-MB page cap. It keeps usable snippets when full text is unavailable. Collection logs partial TLDR issue or paper-week failures.
 
 The writer loads `feedroom/prompts/threads.v1.md` from the installed package and receives up to twelve event groups with bounded source excerpts and ephemeral IDs. It returns up to six event IDs with one Hong Kong Cantonese headline each. The validator checks each headline against its own event, rejects duplicate selections, rejects unsupported figures or unsafe formatting, and enforces the Threads length limit for the whole post. A failed validation gets one revision attempt. Non-editorial previews select source titles directly and apply the same grouping, deduplication, and length limits. Previews use the collection date, while publishing uses the run date. The post text contains the Hong Kong date and headline bullets. The draft keeps the selected source URLs in headline order, the lead candidate and title IDs, and the related candidate and title IDs used for cross-day deduplication.
+
+## Card previews
+
+`preview --cards-dir` derives one card per selected item from the same ordered selection that formats the dated title list. In editorial mode, the writer requests one or two short Cantonese sentences for each selected event, grounded in its primary source, and allows a null summary when evidence is too thin. It validates the summary format and figures against that source. Source-only previews take up to two complete sentences from the selected source snippet. Newsletter edition and aggregator dates are omitted when the linked article's publication date is unknown.
+
+The preview JSON includes the source name, supported date and original URL for each card. The selected D template renders local PNGs through the optional Playwright dependency. The `cards` Docker target installs Chromium and CJK fonts for replays, while scheduled publishing continues to use the default runtime and sends the dated text digest.
 
 ## Delivery boundary
 

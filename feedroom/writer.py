@@ -8,7 +8,9 @@ from importlib.resources import files
 from urllib.error import HTTPError
 from urllib.request import Request, build_opener
 
-from .briefing import MAX_HEADLINES, Draft, build_draft, preview_day
+from .briefing import (
+    MAX_CARD_SUMMARY, MAX_HEADLINES, SENTENCE_END, Draft, SelectedStory, build_draft, preview_day,
+)
 from .collector import DAILY_PAPERS
 from .evidence import ArticleReader, group_stories, source_evidence, story_keys
 from .http import NoRedirect
@@ -23,7 +25,7 @@ class EditorialError(RuntimeError):
     pass
 
 
-def complete(payload: dict, feedback: str | None) -> dict:
+def complete(payload: dict, feedback: str | None, *, include_cards: bool = False) -> dict:
     token = os.environ.get("OPENROUTER_API_KEY", "").strip()
     model = os.environ.get("OPENROUTER_MODEL", "").strip()
     if not token or not model:
@@ -33,6 +35,10 @@ def complete(payload: dict, feedback: str | None) -> dict:
         "type": "object", "additionalProperties": False, "required": ["event_id", "headline"],
         "properties": {"event_id": {"type": "string"}, "headline": {"type": "string"}},
     }
+    if include_cards:
+        prompt += "\n\n" + files("feedroom").joinpath("prompts/cards.v1.md").read_text(encoding="utf-8")
+        item_schema["required"].append("summary")
+        item_schema["properties"]["summary"] = {"type": ["string", "null"]}
     schema = {
         "type": "object", "additionalProperties": False, "required": ["items"],
         "properties": {"items": {"type": "array", "items": item_schema, "maxItems": MAX_HEADLINES}},
@@ -60,7 +66,27 @@ def complete(payload: dict, feedback: str | None) -> dict:
         raise EditorialError("OpenRouter did not return a readable draft.") from None
 
 
-def validate(reply: dict, groups: dict, evidence: dict, day: str) -> Draft | None:
+def numbers(text: str) -> set[str]:
+    return set(NUMBER.findall(unicodedata.normalize("NFKC", text)))
+
+
+def validate_summary(value: str | None, source: dict, headline: str) -> str | None:
+    if value is None:
+        return None
+    summary = value.strip() if isinstance(value, str) else ""
+    endings = list(SENTENCE_END.finditer(summary))
+    if (len(summary) > MAX_CARD_SUMMARY or not 1 <= len(endings) <= 2
+            or endings[-1].end() != len(summary) or not CANTONESE.search(summary)
+            or UNSAFE_TEXT.search(summary) or SIMPLIFIED.intersection(summary)):
+        raise EditorialError(f"Use one or two single-line Traditional Chinese summary sentences up to {MAX_CARD_SUMMARY} characters, or null.")
+    if not numbers(summary) <= numbers(json.dumps(source, ensure_ascii=False)):
+        raise EditorialError("Use only figures supported by the primary source for the card summary.")
+    if summary.rstrip("。！？.!?") == headline.rstrip("。！？.!?"):
+        raise EditorialError("Use the card summary to add a detail, or return null.")
+    return summary
+
+
+def validate(reply: dict, groups: dict, evidence: dict, day: str, *, include_cards: bool = False) -> Draft | None:
     if not isinstance(reply, dict) or set(reply) != {"items"} or not isinstance(reply["items"], list):
         raise EditorialError("Return a list of items in the requested JSON format.")
     items = reply["items"]
@@ -71,10 +97,10 @@ def validate(reply: dict, groups: dict, evidence: dict, day: str) -> Draft | Non
 
     selected = []
     selected_keys = set()
-    numbers = lambda text: set(NUMBER.findall(unicodedata.normalize("NFKC", text)))
+    fields = {"event_id", "headline", "summary"} if include_cards else {"event_id", "headline"}
     for item in items:
-        if not isinstance(item, dict) or set(item) != {"event_id", "headline"} or not isinstance(item["headline"], str):
-            raise EditorialError("Return event_id and headline for each item.")
+        if not isinstance(item, dict) or set(item) != fields or not isinstance(item["headline"], str):
+            raise EditorialError("Return the requested fields for each item.")
         event = item["event_id"]
         if not isinstance(event, str) or event not in groups:
             raise EditorialError("Select an event ID from the supplied evidence.")
@@ -88,16 +114,19 @@ def validate(reply: dict, groups: dict, evidence: dict, day: str) -> Draft | Non
         source_text = json.dumps(evidence[event], ensure_ascii=False)
         if not numbers(headline) <= numbers(source_text):
             raise EditorialError("Copy figures exactly from the selected event or omit them.")
-        selected.append((headline, group))
+        summary = validate_summary(item["summary"], evidence[event][0], headline) if include_cards else None
+        selected.append(SelectedStory(headline, group, summary))
         selected_keys.update(keys)
 
-    draft = build_draft(selected, day, made_with_ai=True)
+    draft = build_draft(selected, day, made_with_ai=True, include_cards=include_cards)
     if draft is None:
         raise EditorialError("Shorten the headlines to fit together within the Threads limit of 500 characters.")
     return draft
 
 
-def write_draft(result: dict, used: set[str], *, day: str | None = None) -> Draft | None:
+def write_draft(
+    result: dict, used: set[str], *, day: str | None = None, include_cards: bool = False,
+) -> Draft | None:
     groups = {}
     reader = ArticleReader()
     evidence = {}
@@ -127,9 +156,9 @@ def write_draft(result: dict, used: set[str], *, day: str | None = None) -> Draf
     ]}
     feedback = None
     for _ in range(2):
-        reply = complete(payload, feedback)
+        reply = complete(payload, feedback, include_cards=include_cards)
         try:
-            return validate(reply, groups, evidence, day)
+            return validate(reply, groups, evidence, day, include_cards=include_cards)
         except EditorialError as error:
             feedback = str(error)
     raise EditorialError(f"Draft failed validation. {feedback}")

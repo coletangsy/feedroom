@@ -1,0 +1,140 @@
+:root {
+  --paper: #eee8db;
+  --ink: #17161a;
+  --quiet-ink: #524c44;
+  --sans: "Noto Sans CJK HK", "Noto Sans CJK TC", "Helvetica Neue", "PingFang HK", "PingFang TC", "Microsoft JhengHei", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 1080px;
+  height: 1350px;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  color: var(--ink);
+  background: var(--paper);
+  font-family: var(--sans);
+}
+
+.card {
+  display: flex;
+  width: 1080px;
+  height: 1350px;
+  flex-direction: column;
+  padding: 79px;
+  overflow: hidden;
+  background: var(--paper);
+}
+
+.brand {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 28px;
+  flex: none;
+}
+
+.brand-identity {
+  display: grid;
+  min-width: 0;
+  gap: 17px;
+}
+
+.brand-name {
+  justify-self: start;
+  padding: 9px 18px;
+  border-radius: 14px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.metadata {
+  display: block;
+  min-height: 45px;
+  color: var(--quiet-ink);
+  font-size: 38px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.metadata-date,
+.metadata-label {
+  white-space: nowrap;
+}
+
+.metadata strong {
+  display: inline;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.metadata .separator {
+  display: inline-block;
+  margin-inline: 16px;
+  white-space: nowrap;
+}
+
+.brand-mark {
+  display: block;
+  width: 135px;
+  height: 135px;
+  flex: none;
+  object-fit: contain;
+}
+
+.story {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 43px;
+  padding-block: 50px;
+  overflow: hidden;
+}
+
+.headline,
+.summary {
+  max-width: 100%;
+  margin: 0;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.headline {
+  font-size: 97px;
+  font-weight: 750;
+  letter-spacing: -0.04em;
+  line-height: 1.15;
+  text-wrap: balance;
+}
+
+.headline-word {
+  white-space: nowrap;
+}
+
+.summary {
+  color: var(--quiet-ink);
+  font-size: 50px;
+  line-height: 1.53;
+  text-wrap: pretty;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    scroll-behavior: auto !important;
+  }
+}

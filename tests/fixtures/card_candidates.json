@@ -1,0 +1,61 @@
+{
+  "collected_at": "2026-11-20T17:00:00Z",
+  "collection_errors": [],
+  "candidates": [
+    {
+      "id": "895c2a600330de8ba4e5",
+      "title_id": "9fd22957f664167ed90b",
+      "title": "模型 API 加入 JSON 結構輸出",
+      "url": "https://example.com/feedroom-card-1",
+      "source": "範例模型研究",
+      "published_at": "2026-11-20",
+      "summary_or_snippet": "開發者可以先定好回覆欄位同資料類型。例如由會議紀錄擷取待辦事項同限期。",
+      "score": 10,
+      "section": "latest"
+    },
+    {
+      "id": "8be45290c5d348d38291",
+      "title_id": "ff9d7a05c964b06c3c91",
+      "title": "資料平台支援增量更新向量索引",
+      "url": "https://example.com/feedroom-card-2",
+      "source": "範例資料平台",
+      "published_at": "2026-11-20",
+      "summary_or_snippet": "平台只會重算有改動嘅項目，更新少量資料時可以沿用現有索引。",
+      "score": 10,
+      "section": "latest"
+    },
+    {
+      "id": "ccf44cb00c41d343cd58",
+      "title_id": "a5f8cadb29da277a30c2",
+      "title": "團隊公開廣東話語音辨識評測",
+      "url": "https://example.com/feedroom-card-3",
+      "source": "範例研究團隊",
+      "published_at": "2026-11-20",
+      "summary_or_snippet": "評測包含電話錄音同會議錄音，方便研究團隊比較兩種場景嘅表現。",
+      "score": 10,
+      "section": "latest"
+    },
+    {
+      "id": "f105e93fb81ebdb7ba41",
+      "title_id": "8d9a64886cafe680722f",
+      "title": "A/B 測試平台加入樣本比例檢查",
+      "url": "https://example.com/feedroom-card-4",
+      "source": "Example Experimentation Engineering",
+      "published_at": "2026-11-20",
+      "summary_or_snippet": "平台會檢查分組比例同實際流量有冇偏差。比例異常時會提示團隊檢查分流設定。",
+      "score": 10,
+      "section": "latest"
+    },
+    {
+      "id": "e22af583264d203c959e",
+      "title_id": "d04cf9f7250e572dc0dc",
+      "title": "推理工具加入 GPU 記憶體用量報告",
+      "url": "https://example.com/feedroom-card-5",
+      "source": "範例推理開發組",
+      "published_at": "2026-11-20",
+      "summary_or_snippet": "報告逐步列出載入模型同產生回覆時嘅記憶體用量。",
+      "score": 10,
+      "section": "latest"
+    }
+  ]
+}
