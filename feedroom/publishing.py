@@ -28,17 +28,53 @@ def wait_for_containers(threads, *container_ids: str) -> str:
     return "IN_PROGRESS"
 
 
-def create_card_container(threads, day: str, text: str, cards: tuple[Card, ...], urls: tuple[str, ...]) -> str:
-    alt_texts = ("\n".join(filter(None, (card.headline, card.summary, card.source_name))) for card in cards)
-    images = tuple(zip(urls, alt_texts, strict=True))
-    if len(images) == 1:
-        url, alt_text = images[0]
-        return threads.create_image(url, alt_text=alt_text, text=text, topic_tag="AI Threads")
-    children = tuple(threads.create_image(url, alt_text=alt_text, carousel_item=True) for url, alt_text in images)
-    status = wait_for_containers(threads, *children)
-    if status != "FINISHED":
-        raise ThreadsError(f"Image containers for {day} are not ready to publish.")
-    return threads.create_carousel(text, children, topic_tag="AI Threads")
+def card_alt_text(card: Card) -> str:
+    return "\n".join(filter(None, (card.headline, card.summary, card.source_name)))
+
+
+def prepare_card_post(journal, threads, media, day: str, posts: dict, revision: str | None) -> None:
+    post = posts[day]
+    cards = tuple(Card(**card) for card in post["cards"])
+    children = post.get("card_children", [])
+    if len(children) > len(cards):
+        raise ThreadsError(f"The saved image containers do not match the card draft for {day}.")
+    urls = ()
+    if len(cards) == 1 or len(children) < len(cards):
+        with TemporaryDirectory() as temp:
+            paths = render_cards(cards, Path(temp) / "cards")
+            urls = media.upload(day, paths)
+
+    if len(cards) == 1:
+        container_id = threads.create_image(
+            urls[0], alt_text=card_alt_text(cards[0]), text=post["text"], topic_tag="AI Threads",
+        )
+    else:
+        # Keep acknowledged children so retries only create missing items.
+        start = len(children)
+        for card, url in zip(cards[start:], urls[start:], strict=True):
+            child = threads.create_image(url, alt_text=card_alt_text(card), carousel_item=True)
+            children = [*children, child]
+            updated = {**post, "card_children": children}
+            if not journal.write({**posts, day: updated}, revision):
+                return
+            posts, revision = journal.read()
+            if posts.get(day) != updated:
+                return
+            post = updated
+
+        status = wait_for_containers(threads, *children)
+        if status in {"ERROR", "EXPIRED"}:
+            if journal.write({**posts, day: {**post, "card_children": []}}, revision):
+                raise ThreadsError(f"Image containers for {day} ended in {status}. Retry to recreate them.")
+            return
+        if status != "FINISHED":
+            raise ThreadsError(f"Image containers for {day} are not ready to publish.")
+        if journal.read()[1] != revision:
+            return
+        container_id = threads.create_carousel(post["text"], tuple(children), topic_tag="AI Threads")
+
+    ready = {**post, "status": "ready", "container_id": container_id, "link_attachment": None}
+    journal.write({**posts, day: ready}, revision)
 
 
 def deliver(journal, threads, collect, now: datetime, *, write, media=None) -> dict:
@@ -75,8 +111,11 @@ def deliver(journal, threads, collect, now: datetime, *, write, media=None) -> d
             continue
 
         post = posts.get(day)
-        if post and media is not None and post["status"] in {"claimed", "ready"} and not post.get("cards"):
-            raise ThreadsError(f"A text draft already exists for {day}. Resolve it before publishing cards.")
+        if post and post["status"] in {"claimed", "ready"}:
+            if post.get("cards") and media is None:
+                raise ThreadsError(f"Resume the card draft for {day} with publish --with-cards.")
+            if not post.get("cards") and media is not None:
+                raise ThreadsError(f"A text draft already exists for {day}. Resolve it before publishing cards.")
         if post is None:
             used = {key for post in posts.values() if post["status"] != "failed"
                     for key in (post["candidate_id"], post["title_id"], *post.get("related_ids", []))}
@@ -92,15 +131,9 @@ def deliver(journal, threads, collect, now: datetime, *, write, media=None) -> d
         elif post["status"] == "claimed":
             # Concurrent starts can create extra containers. Only the saved one can be published.
             if post.get("cards"):
-                if media is None:
-                    raise ThreadsError(f"Resume the card draft for {day} with publish --with-cards.")
-                cards = tuple(Card(**card) for card in post["cards"])
-                with TemporaryDirectory() as temp:
-                    paths = render_cards(cards, Path(temp) / "cards")
-                    urls = media.upload(day, paths)
-                container_id = create_card_container(threads, day, post["text"], cards, urls)
-            else:
-                container_id = threads.create(post["text"], topic_tag="AI Threads")
+                prepare_card_post(journal, threads, media, day, posts, revision)
+                continue
+            container_id = threads.create(post["text"], topic_tag="AI Threads")
             ready = {**post, "status": "ready", "container_id": container_id, "link_attachment": None}
             journal.write({**posts, day: ready}, revision)
         elif post["status"] == "ready":

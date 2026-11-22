@@ -89,7 +89,7 @@ docker compose --profile cards build feedroom-cards
 docker compose --profile cards run --rm feedroom-cards publish --with-cards
 ```
 
-兩種發佈方式共用同一份發佈紀錄。同一香港日期已有發佈紀錄時，指令回傳 `already_published`。日常排程使用 `feedroom publish` 發佈純文字。若上傳失敗，或容器仍在處理，可用同一個 `--with-cards` 指令重試。若 Threads 將已保存的容器標為 `ERROR` 或 `EXPIRED`，須先核對當日發佈紀錄。
+兩種發佈方式共用同一份發佈紀錄。同一香港日期已有發佈紀錄時，指令回傳 `already_published`。日常排程使用 `feedroom publish` 發佈純文字。圖卡指令可以重用已確認的圖片容器，繼續未完成的輪播。若 Threads 將已保存的貼文容器標為 `ERROR` 或 `EXPIRED`，須先核對當日發佈紀錄。
 
 ### Threads 帳戶與試帖
 

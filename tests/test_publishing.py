@@ -135,10 +135,38 @@ class PublishingTests(unittest.TestCase):
         self.threads.create.assert_not_called()
         self.threads.publish.assert_not_called()
         self.threads.status.return_value = "FINISHED"
+        with self.assertRaisesRegex(ThreadsError, "resume|Resume"):
+            deliver(self.journal, self.threads, collect, NOW, write=select_draft)
+        self.threads.publish.assert_not_called()
         self.assertEqual(deliver(self.journal, self.threads, collect, NOW, write=select_draft, media=media)["status"],
                          "published")
         self.threads.publish.assert_called_once_with("22")
         self.threads.create_image.assert_called_once()
+
+    def test_carousel_retry_reuses_confirmed_image_children(self):
+        first = story("模型動態", "https://example.com/model")
+        second = story("資料平台", "https://example.org/platform")
+        collect = Mock(return_value=result(first, second))
+        write = lambda data, used, *, day: select_draft(data, used, day=day, include_cards=True)
+        media = Mock()
+        urls = ("https://cards.example/01.png", "https://cards.example/02.png")
+        media.upload.return_value = urls
+        self.threads.create_image.side_effect = ("54", ThreadsError("Second image unavailable"), "13")
+        self.threads.create_carousel.return_value = "22"
+
+        with patch("feedroom.publishing.render_cards", return_value=(Path("01.png"), Path("02.png"))):
+            with self.assertRaisesRegex(ThreadsError, "Second image unavailable"):
+                deliver(self.journal, self.threads, collect, NOW, write=write, media=media)
+            self.assertEqual(self.journal.read()[0][DAY]["card_children"], ["54"])
+            self.threads.publish.assert_not_called()
+            published = deliver(self.journal, self.threads, collect, NOW, write=write, media=media)
+
+        self.assertEqual(published["status"], "published")
+        self.assertEqual([request.args[0] for request in self.threads.create_image.call_args_list], [urls[0], urls[1], urls[1]])
+        self.threads.create_carousel.assert_called_once_with(
+            f"{DAY}\n• {first['title']}\n• {second['title']}", ("54", "13"), topic_tag="AI Threads",
+        )
+        self.threads.publish.assert_called_once_with("22")
 
     def test_cli_card_publish_uses_the_separate_media_store_and_writes_card_drafts(self):
         output = io.StringIO()
