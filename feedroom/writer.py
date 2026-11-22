@@ -19,6 +19,7 @@ NUMBER = re.compile(r"[+−-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?")
 UNSAFE_TEXT = re.compile(r"https?\s*[:：]|www\.|[\x00-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069<>\[\]`*@★•]", re.IGNORECASE)
 SIMPLIFIED = set("风买开发这说数据实权写软稳进选览优项网络页领结论报术应转让识压测验学与现层显样众获类关读书质访")
 CANTONESE = re.compile(r"[\u3400-\u9fff]")
+MAX_EDITORIAL_HEADLINE = 40
 
 
 class EditorialError(RuntimeError):
@@ -110,6 +111,8 @@ def validate(reply: dict, groups: dict, evidence: dict, day: str, *, include_car
         headline = item["headline"].strip()
         if not CANTONESE.search(headline) or UNSAFE_TEXT.search(headline) or SIMPLIFIED.intersection(headline):
             raise EditorialError("Use single-line Traditional Chinese headlines without links, bullets, markup or mentions.")
+        if len(headline) > MAX_EDITORIAL_HEADLINE:
+            raise EditorialError(f"Keep the opening main clause in each headline and use at most {MAX_EDITORIAL_HEADLINE} characters.")
         source_text = json.dumps(evidence[event], ensure_ascii=False)
         if not numbers(headline) <= numbers(source_text):
             raise EditorialError("Copy figures exactly from the selected event or omit them.")

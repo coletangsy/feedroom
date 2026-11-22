@@ -2,23 +2,46 @@
 
 from dataclasses import asdict
 from datetime import datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from time import sleep
 
-from .briefing import HKT
+from .briefing import HKT, Card
+from .card_render import render_cards
 from .threads import ThreadsError
 
 
-def wait_for_container(threads, container_id: str) -> str:
+def wait_for_containers(threads, *container_ids: str) -> str:
     # Give Threads time to process the upload, then poll at most once per minute.
     for delay in (30, 60, 60, 60, 60):
         sleep(delay)
-        status = threads.status(container_id)
-        if status != "IN_PROGRESS":
-            return status
+        pending = []
+        for container_id in container_ids:
+            status = threads.status(container_id)
+            if status == "IN_PROGRESS":
+                pending.append(container_id)
+            elif status != "FINISHED":
+                return status
+        if not pending:
+            return "FINISHED"
+        container_ids = tuple(pending)
     return "IN_PROGRESS"
 
 
-def deliver(journal, threads, collect, now: datetime, *, write) -> dict:
+def create_card_container(threads, day: str, text: str, cards: tuple[Card, ...], urls: tuple[str, ...]) -> str:
+    alt_texts = ("\n".join(filter(None, (card.headline, card.summary, card.source_name))) for card in cards)
+    images = tuple(zip(urls, alt_texts, strict=True))
+    if len(images) == 1:
+        url, alt_text = images[0]
+        return threads.create_image(url, alt_text=alt_text, text=text, topic_tag="AI Threads")
+    children = tuple(threads.create_image(url, alt_text=alt_text, carousel_item=True) for url, alt_text in images)
+    status = wait_for_containers(threads, *children)
+    if status != "FINISHED":
+        raise ThreadsError(f"Image containers for {day} are not ready to publish.")
+    return threads.create_carousel(text, children, topic_tag="AI Threads")
+
+
+def deliver(journal, threads, collect, now: datetime, *, write, media=None) -> dict:
     day = now.astimezone(HKT).date().isoformat()
     result = None
     draft = None
@@ -32,7 +55,10 @@ def deliver(journal, threads, collect, now: datetime, *, write) -> dict:
             if status == "PUBLISHED":
                 # Older containers used the lead source URL as their link attachment.
                 attachment = post.get("link_attachment", post.get("source_url"))
-                post_id = threads.find_post(post["text"], post["prepared_at"], link_attachment=attachment)
+                media_match = {}
+                if cards := post.get("cards"):
+                    media_match["media_type"] = "IMAGE" if len(cards) == 1 else "CAROUSEL_ALBUM"
+                post_id = threads.find_post(post["text"], post["prepared_at"], link_attachment=attachment, **media_match)
                 if journal.write({**posts, pending: {**post, "status": "published", "post_id": post_id}}, revision):
                     return {"status": "reconciled", "day": pending, "post_id": post_id}
             elif status in {"ERROR", "EXPIRED"}:
@@ -49,6 +75,8 @@ def deliver(journal, threads, collect, now: datetime, *, write) -> dict:
             continue
 
         post = posts.get(day)
+        if post and media is not None and post["status"] in {"claimed", "ready"} and not post.get("cards"):
+            raise ThreadsError(f"A text draft already exists for {day}. Resolve it before publishing cards.")
         if post is None:
             used = {key for post in posts.values() if post["status"] != "failed"
                     for key in (post["candidate_id"], post["title_id"], *post.get("related_ids", []))}
@@ -63,12 +91,21 @@ def deliver(journal, threads, collect, now: datetime, *, write) -> dict:
             journal.write({**posts, day: post}, revision)
         elif post["status"] == "claimed":
             # Concurrent starts can create extra containers. Only the saved one can be published.
-            container_id = threads.create(post["text"], topic_tag="AI Threads")
+            if post.get("cards"):
+                if media is None:
+                    raise ThreadsError(f"Resume the card draft for {day} with publish --with-cards.")
+                cards = tuple(Card(**card) for card in post["cards"])
+                with TemporaryDirectory() as temp:
+                    paths = render_cards(cards, Path(temp) / "cards")
+                    urls = media.upload(day, paths)
+                container_id = create_card_container(threads, day, post["text"], cards, urls)
+            else:
+                container_id = threads.create(post["text"], topic_tag="AI Threads")
             ready = {**post, "status": "ready", "container_id": container_id, "link_attachment": None}
             journal.write({**posts, day: ready}, revision)
         elif post["status"] == "ready":
             container_id = post["container_id"]
-            status = wait_for_container(threads, container_id)
+            status = wait_for_containers(threads, container_id)
             if status in {"ERROR", "EXPIRED"}:
                 if journal.write({**posts, day: {**post, "status": "failed", "reason": status}}, revision):
                     raise ThreadsError(f"Threads container for {day} ended in {status}.")

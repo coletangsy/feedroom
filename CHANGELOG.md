@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added explicit Threads card publishing with a dedicated private R2 bucket, Hong Kong date folders and short-lived image URLs.
 - Added an opt-in preview that renders one 1080 × 1350 news card per selected Threads headline, with a source-grounded summary and a fixture for Docker or local replays.
 
 - Added the `feedroom` Python package and CLI for collection, preview, and daily Threads publishing with account verification and a durable post journal.
@@ -13,6 +14,7 @@
 
 ### Changed
 
+- Shortened Cantonese digest headlines to their opening main clause, with supporting details in the card summary.
 - Limited remote branch cleanup to PRs merged into `main` and documented the local branch cleanup and Docker image rebuild on the scheduled host.
 - Formatted the daily Threads digest as a Hong Kong date followed by five or six headline bullets when the evidence and post length allow. The journal retains each headline's source URL and the deduplication IDs for related coverage.
 - Added the `AI Threads` topic tag to daily posts and removed the lead link preview and Feedroom's automatic AI self-disclosure.

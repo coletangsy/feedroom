@@ -1,4 +1,4 @@
-"""Send explicit two-step text publications to the configured Threads account."""
+"""Send two-step publications to the configured Threads account."""
 
 import json
 import re
@@ -54,7 +54,25 @@ class Threads:
             raise ThreadsError("Threads access token does not belong to the configured account.")
 
     def create(self, text: str, *, topic_tag: str) -> str:
-        fields = {"media_type": "TEXT", "text": text, "topic_tag": topic_tag}
+        return self.create_container({"media_type": "TEXT", "text": text, "topic_tag": topic_tag})
+
+    def create_image(
+        self, image_url: str, *, alt_text: str, carousel_item: bool = False, text: str = "", topic_tag: str = "",
+    ) -> str:
+        fields = {"media_type": "IMAGE", "image_url": image_url, "alt_text": alt_text}
+        if carousel_item:
+            fields["is_carousel_item"] = "true"
+        else:
+            fields.update(text=text, topic_tag=topic_tag)
+        return self.create_container(fields)
+
+    def create_carousel(self, text: str, children: tuple[str, ...], *, topic_tag: str) -> str:
+        return self.create_container({
+            "media_type": "CAROUSEL", "text": text, "topic_tag": topic_tag,
+            "children": ",".join(threads_id(child) for child in children),
+        })
+
+    def create_container(self, fields: dict[str, str]) -> str:
         result = self.request(f"{self.account_id}/threads", fields, method="POST")
         return threads_id(result.get("id"))
 
@@ -65,11 +83,15 @@ class Threads:
     def status(self, container_id: str) -> str:
         return self.request(threads_id(container_id), {"fields": "status"}).get("status", "")
 
-    def find_post(self, text: str, since: str, *, link_attachment: str | None = None) -> str:
+    def find_post(
+        self, text: str, since: str, *, link_attachment: str | None = None, media_type: str | None = None,
+    ) -> str:
         path = f"{self.account_id}/threads"
         fields = {"fields": "id,text", "since": since, "limit": "25"}
         if link_attachment:
             fields["fields"] += ",link_attachment_url"
+        if media_type:
+            fields["fields"] += ",media_type"
         seen_cursors = set()
         matches = set()
         for _ in range(MAX_POST_LOOKUP_PAGES):
@@ -80,6 +102,7 @@ class Threads:
             matches.update(
                 threads_id(post.get("id")) for post in data if post.get("text") == text
                 and (not link_attachment or post.get("link_attachment_url") == link_attachment)
+                and (not media_type or post.get("media_type") == media_type)
             )
 
             paging = result.get("paging")
