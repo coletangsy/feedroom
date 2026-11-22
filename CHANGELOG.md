@@ -28,6 +28,10 @@
 - Kept valid stories when a feed article URL is malformed or an individual TLDR issue fails.
 - Recognized Anthropic listing cards with a date in the card header and title in a sibling link.
 
+### Removed
+
+- Removed the archived MODHAUS reports from `reports/`.
+
 ### Documentation
 
 - Removed the repository-level briefing skills and routed Feedroom previews through the CLI.
