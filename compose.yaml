@@ -13,5 +13,18 @@ services:
     volumes:
       - threads-state:/data
 
+  feedroom-cards:
+    extends:
+      service: feedroom
+    profiles: [cards]
+    build:
+      context: .
+      target: cards
+    environment:
+      - FEEDROOM_MEDIA_R2_ACCOUNT_ID
+      - FEEDROOM_MEDIA_R2_BUCKET
+      - FEEDROOM_MEDIA_R2_ACCESS_KEY_ID
+      - FEEDROOM_MEDIA_R2_SECRET_ACCESS_KEY
+
 volumes:
   threads-state:

@@ -58,7 +58,7 @@ python -m playwright install --only-shell chromium
 feedroom preview --candidates tests/fixtures/card_candidates.json --cards-dir build/cards-fixture
 ```
 
-來源模式摘錄來源摘要的首一至兩句完整句子。加上 `--editorial` 可用 OpenRouter 撰寫有來源支持的粵語標題及一至兩句圖卡摘要。可用細節不足時會省略摘要，並為已選的標題保留一張卡。
+來源模式摘錄來源摘要的首一至兩句完整句子。加上 `--editorial` 可用 OpenRouter 撰寫有來源支持的粵語標題及一至兩句圖卡摘要。每則編輯標題保留開頭的主要消息，最多 40 字元，補充細節放在圖卡摘要。可用細節不足時會省略摘要，並為已選的標題保留一張卡。
 
 Docker 的 `cards` target 隨附 Chromium 和 Noto CJK 字型。以下使用同一份五則消息的 fixture，並將圖檔寫入本機 `build/`。 [Playwright Docker 文件](https://playwright.dev/python/docs/docker)
 
@@ -70,6 +70,26 @@ docker run --rm --init --ipc=host --network none \
   --mount "type=bind,source=$PWD/build,target=/output" \
   feedroom-cards preview --candidates /fixtures/cards.json --cards-dir /output/cards-docker
 ```
+
+### 用 R2 發佈圖卡
+
+本機可以用 `publish --with-cards` 發佈當日摘要。Feedroom 會按香港日期把 PNG 放到專用的私人 R2 bucket，路徑為 `threads/YYYY-MM-DD/`。一張圖卡會發成單圖，多張會按摘要順序發成輪播。Meta 透過有效一小時的簽名網址讀取圖卡。 [Threads 輪播文件](https://developers.facebook.com/documentation/threads/posts#carousel-posts) · [R2 簽名網址](https://developers.cloudflare.com/r2/api/s3/presigned-urls/)
+
+建立私人 bucket `feedroom-media` 和一組只限該 bucket 的 **Object Read & Write** S3 憑證。將以下變數填入本機 `.env`。請保留 bucket 的私人設定。 [R2 憑證設定](https://developers.cloudflare.com/r2/api/tokens/)
+
+```dotenv
+FEEDROOM_MEDIA_R2_ACCOUNT_ID=
+FEEDROOM_MEDIA_R2_BUCKET=feedroom-media
+FEEDROOM_MEDIA_R2_ACCESS_KEY_ID=
+FEEDROOM_MEDIA_R2_SECRET_ACCESS_KEY=
+```
+
+```sh
+docker compose --profile cards build feedroom-cards
+docker compose --profile cards run --rm feedroom-cards publish --with-cards
+```
+
+兩種發佈方式共用同一份發佈紀錄。同一香港日期已有發佈紀錄時，指令回傳 `already_published`。日常排程使用 `feedroom publish` 發佈純文字。圖卡指令可以重用已確認的圖片容器，繼續未完成的輪播。若 Threads 將已保存的貼文容器標為 `ERROR` 或 `EXPIRED`，須先核對當日發佈紀錄。
 
 ### Threads 帳戶與試帖
 

@@ -67,6 +67,19 @@ class WriterTests(TestCase):
         self.assertNotIn("95%", result.text)
         self.assertIn("selected event", model.call_args.args[1])
 
+    def test_retries_long_headlines_and_uses_the_same_short_title_on_the_card(self):
+        headline = "研究團隊發佈新模型"
+        summary = "研究團隊報告準確率有 72%。"
+        long = {"items": [{"event_id": "E1", "headline": headline + "，" + "補充研究內容" * 8, "summary": summary}]}
+        short = {"items": [{"event_id": "E1", "headline": headline, "summary": summary}]}
+        with patch("feedroom.writer.complete", side_effect=[long, short]) as model:
+            draft = write_draft(collected(ARTICLE), set(), include_cards=True)
+
+        self.assertIn("40 characters", model.call_args.args[1])
+        self.assertEqual(draft.text, f"2026-11-20\n• {headline}")
+        self.assertEqual(draft.cards[0].headline, headline)
+        self.assertEqual(draft.cards[0].summary, summary)
+
     def test_selects_five_or_six_ordered_headlines_and_tracks_each_source(self):
         for count in (5, 6):
             with self.subTest(count=count):

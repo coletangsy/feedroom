@@ -90,6 +90,101 @@ class PublishingTests(unittest.TestCase):
         self.assertEqual(self.sleep.call_args_list, [call(30), call(60)])
         self.threads.publish.assert_called_once_with("22")
 
+    def test_card_digest_creates_children_in_order_and_publishes_only_the_carousel(self):
+        lead = story("模型動態", "https://example.com/model")
+        other = story("資料平台", "https://example.org/platform")
+        write = lambda data, used, *, day: select_draft(data, used, day=day, include_cards=True)
+        media = Mock()
+        urls = ("https://cards.example/01.png", "https://cards.example/02.png")
+        media.upload.return_value = urls
+        self.threads.create_image.side_effect = ("54", "13")
+        self.threads.create_carousel.return_value = "22"
+        with patch("feedroom.publishing.render_cards", return_value=(Path("01.png"), Path("02.png"))) as render:
+            result_ = deliver(self.journal, self.threads, lambda _: result(lead, other), NOW, write=write, media=media)
+
+        self.assertEqual(result_["status"], "published")
+        self.assertEqual([card.headline for card in render.call_args.args[0]], [lead["title"], other["title"]])
+        media.upload.assert_called_once_with(DAY, (Path("01.png"), Path("02.png")))
+        self.assertEqual(self.threads.create_image.call_args_list, [
+            call(urls[0], alt_text=f"{lead['title']}\nSource", carousel_item=True),
+            call(urls[1], alt_text=f"{other['title']}\nSource", carousel_item=True),
+        ])
+        self.threads.create_carousel.assert_called_once_with(
+            f"{DAY}\n• {lead['title']}\n• {other['title']}", ("54", "13"), topic_tag="AI Threads",
+        )
+        self.threads.create.assert_not_called()
+        self.threads.publish.assert_called_once_with("22")
+        self.assertNotIn(urls[0], json.dumps(self.journal.read()[0]))
+
+    def test_single_card_post_resumes_its_image_container_while_processing(self):
+        collect = Mock(return_value=result(story("模型動態")))
+        media = Mock()
+        media.upload.return_value = ("https://cards.example/01.png",)
+        self.threads.create_image.return_value = "22"
+        self.threads.status.return_value = "IN_PROGRESS"
+        with patch("feedroom.publishing.render_cards", return_value=(Path("01.png"),)):
+            with self.assertRaisesRegex(ThreadsError, "not ready"):
+                deliver(self.journal, self.threads, collect, NOW,
+                        write=lambda data, used, *, day: select_draft(data, used, day=day, include_cards=True),
+                        media=media)
+        self.assertEqual(self.journal.read()[0][DAY]["status"], "ready")
+        self.threads.create_image.assert_called_once_with(
+            "https://cards.example/01.png", alt_text="模型動態\nSource",
+            text=f"{DAY}\n• 模型動態", topic_tag="AI Threads",
+        )
+        self.threads.create.assert_not_called()
+        self.threads.publish.assert_not_called()
+        self.threads.status.return_value = "FINISHED"
+        with self.assertRaisesRegex(ThreadsError, "resume|Resume"):
+            deliver(self.journal, self.threads, collect, NOW, write=select_draft)
+        self.threads.publish.assert_not_called()
+        self.assertEqual(deliver(self.journal, self.threads, collect, NOW, write=select_draft, media=media)["status"],
+                         "published")
+        self.threads.publish.assert_called_once_with("22")
+        self.threads.create_image.assert_called_once()
+
+    def test_carousel_retry_reuses_confirmed_image_children(self):
+        first = story("模型動態", "https://example.com/model")
+        second = story("資料平台", "https://example.org/platform")
+        collect = Mock(return_value=result(first, second))
+        write = lambda data, used, *, day: select_draft(data, used, day=day, include_cards=True)
+        media = Mock()
+        urls = ("https://cards.example/01.png", "https://cards.example/02.png")
+        media.upload.return_value = urls
+        self.threads.create_image.side_effect = ("54", ThreadsError("Second image unavailable"), "13")
+        self.threads.create_carousel.return_value = "22"
+
+        with patch("feedroom.publishing.render_cards", return_value=(Path("01.png"), Path("02.png"))):
+            with self.assertRaisesRegex(ThreadsError, "Second image unavailable"):
+                deliver(self.journal, self.threads, collect, NOW, write=write, media=media)
+            self.assertEqual(self.journal.read()[0][DAY]["card_children"], ["54"])
+            self.threads.publish.assert_not_called()
+            published = deliver(self.journal, self.threads, collect, NOW, write=write, media=media)
+
+        self.assertEqual(published["status"], "published")
+        self.assertEqual([request.args[0] for request in self.threads.create_image.call_args_list], [urls[0], urls[1], urls[1]])
+        self.threads.create_carousel.assert_called_once_with(
+            f"{DAY}\n• {first['title']}\n• {second['title']}", ("54", "13"), topic_tag="AI Threads",
+        )
+        self.threads.publish.assert_called_once_with("22")
+
+    def test_cli_card_publish_uses_the_separate_media_store_and_writes_card_drafts(self):
+        output = io.StringIO()
+        media = Mock()
+        with (
+            patch.dict("os.environ", {"THREADS_ACCESS_TOKEN": "synthetic", "THREADS_ACCOUNT_ID": "11"}, clear=True),
+            patch("feedroom.cli.Threads", return_value=self.threads),
+            patch("feedroom.cli.open_journal", return_value=self.journal),
+            patch("feedroom.cli.open_media", return_value=media),
+            patch("feedroom.cli.write_draft", side_effect=select_draft),
+            patch("feedroom.cli.deliver", return_value={"status": "no_story"}) as run,
+            redirect_stdout(output),
+        ):
+            self.assertEqual(main(["publish", "--with-cards"]), 0)
+            draft = run.call_args.kwargs["write"](result(story("模型動態")), set(), day=DAY)
+        self.assertIs(run.call_args.kwargs["media"], media)
+        self.assertEqual(draft.cards[0].headline, "模型動態")
+
     def test_retry_checks_a_container_that_was_still_processing(self):
         collect = Mock(return_value=result(story()))
         self.threads.status.return_value = "IN_PROGRESS"

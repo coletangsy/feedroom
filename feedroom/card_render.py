@@ -128,7 +128,7 @@ def render_cards(cards: tuple[Card, ...], output_dir: Path) -> tuple[Path, ...]:
     """Render one image per card in order and atomically finalize the batch.
 
     ``output_dir`` must not exist. Existing files and batches are never replaced.
-    The Playwright import is intentionally delayed until this preview-only path.
+    The Playwright import is intentionally delayed until cards are requested.
     """
 
     cards = tuple(cards)
