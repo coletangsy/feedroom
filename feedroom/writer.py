@@ -51,7 +51,6 @@ def complete(payload: dict, feedback: str | None, *, include_cards: bool = False
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
         ],
         "response_format": {"type": "json_schema", "json_schema": {"name": "threads_post", "strict": True, "schema": schema}},
-        "max_tokens": 5000,
         "provider": {"require_parameters": True, "data_collection": "deny"},
     }
     request = Request("https://openrouter.ai/api/v1/chat/completions", json.dumps(body).encode(),

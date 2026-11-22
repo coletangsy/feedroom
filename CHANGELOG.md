@@ -19,6 +19,7 @@
 
 ### Fixed
 
+- Removed Feedroom's 5,000-token limit on OpenRouter requests so model reasoning can run beyond that limit and still return a draft.
 - Excluded published papers before capping the reading shortlist for Threads.
 - Added a container readiness check before publication and paginated post recovery after a lost response.
 - Kept valid stories when a feed article URL is malformed or an individual TLDR issue fails.
