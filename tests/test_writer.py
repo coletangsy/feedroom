@@ -148,6 +148,8 @@ class WriterTests(TestCase):
         request = opener.return_value.open.call_args.args[0]
         self.assertEqual(request.full_url, "https://openrouter.ai/api/v1/chat/completions")
         body = json.loads(request.data)
+        self.assertNotIn("max_tokens", body)
+        self.assertNotIn("max_completion_tokens", body)
         schema = body["response_format"]["json_schema"]
         self.assertTrue(schema["strict"])
         self.assertEqual(set(schema["schema"]["required"]), {"items"})
