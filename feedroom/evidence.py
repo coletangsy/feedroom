@@ -9,10 +9,10 @@ from urllib.robotparser import RobotFileParser
 
 from trafilatura import extract
 
-from .collector import FEEDS, USER_AGENT, is_article_url, item_id, title_id
+from .collector import DAIR_AI_PAPERS, FEEDS, USER_AGENT, is_article_url, item_id, title_id
 from .http import NoRedirect
 
-ARTICLE_HOSTS = {urlsplit(feed.url).hostname for feed in FEEDS} | {"arxiv.org"}
+ARTICLE_HOSTS = {urlsplit(feed.url).hostname for feed in (*FEEDS, DAIR_AI_PAPERS)} | {"arxiv.org"}
 STOP_WORDS = {"about", "after", "from", "into", "more", "that", "their", "this", "what", "when", "with", "will", "your"}
 URL_TEXT = re.compile(r"(?:https?://|www\.)[^\s<>]+", re.IGNORECASE)
 
@@ -92,10 +92,11 @@ class ArticleReader:
 def source_evidence(item: dict, reader: ArticleReader) -> dict:
     snippet = item["summary_or_snippet"].strip()
     article = reader.text(item["url"])
+    date_field = "coverage_end_date" if item["source"] == DAIR_AI_PAPERS.name else "source_date"
     return {
         "publisher": item["source"],
         "title": URL_TEXT.sub("[link]", item["title"]),
-        "source_date": item["published_at"],
+        date_field: item["published_at"],
         "snippet": URL_TEXT.sub("[link]", snippet),
         "article_excerpt": URL_TEXT.sub("[link]", article[:2500]) if len(article) >= 500 else "",
         **({"hugging_face_upvotes": item["upvotes"]} if item.get("upvotes") else {}),

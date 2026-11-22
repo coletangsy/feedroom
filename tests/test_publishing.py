@@ -227,6 +227,7 @@ class PublishingTests(unittest.TestCase):
             patch("feedroom.collector.tldr_entries", return_value=[]),
             patch("feedroom.collector.hn_entries", return_value=[]),
             patch("feedroom.collector.paper_candidates", return_value=papers),
+            patch("feedroom.collector.dair_entries", return_value=[]),
             redirect_stdout(output),
         ):
             clock.now.return_value = NOW

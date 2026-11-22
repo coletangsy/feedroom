@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
-from .collector import TLDR_AI_FEED, parse_date, title_id
+from .collector import DAIR_AI_PAPERS, TLDR_AI_FEED, parse_date, title_id
 from .evidence import URL_TEXT, group_stories, story_keys
 
 HKT = timezone(timedelta(hours=8), "HKT")
@@ -57,7 +57,7 @@ def source_summary(snippet: str) -> str | None:
 def build_card(headline: str, article: dict[str, Any], summary: str | None) -> Card:
     # Newsletter and aggregator dates describe the coverage, not the linked article.
     source = article["source"]
-    published = None if source in {TLDR_AI_FEED.name, "Hacker News"} else parse_date(article.get("published_at"))
+    published = None if source in {DAIR_AI_PAPERS.name, TLDR_AI_FEED.name, "Hacker News"} else parse_date(article.get("published_at"))
     return Card(headline, summary, source, published.date().isoformat() if published else None, article["url"])
 
 
