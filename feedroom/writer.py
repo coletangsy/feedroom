@@ -11,7 +11,7 @@ from urllib.request import Request, build_opener
 from .briefing import (
     MAX_CARD_SUMMARY, MAX_HEADLINES, SENTENCE_END, Draft, SelectedStory, build_draft, preview_day,
 )
-from .collector import DAILY_PAPERS
+from .collector import DAILY_PAPERS, DAIR_AI_PAPERS
 from .evidence import ArticleReader, group_stories, source_evidence, story_keys
 from .http import NoRedirect
 
@@ -70,6 +70,11 @@ def numbers(text: str) -> set[str]:
     return set(NUMBER.findall(unicodedata.normalize("NFKC", text)))
 
 
+def evidence_numbers(sources: list[dict]) -> set[str]:
+    claims = [{key: value for key, value in source.items() if key != "coverage_end_date"} for source in sources]
+    return numbers(json.dumps(claims, ensure_ascii=False))
+
+
 def validate_summary(value: str | None, source: dict, headline: str) -> str | None:
     if value is None:
         return None
@@ -79,7 +84,7 @@ def validate_summary(value: str | None, source: dict, headline: str) -> str | No
             or endings[-1].end() != len(summary) or not CANTONESE.search(summary)
             or UNSAFE_TEXT.search(summary) or SIMPLIFIED.intersection(summary)):
         raise EditorialError(f"Use one or two single-line Traditional Chinese summary sentences up to {MAX_CARD_SUMMARY} characters, or null.")
-    if not numbers(summary) <= numbers(json.dumps(source, ensure_ascii=False)):
+    if not numbers(summary) <= evidence_numbers([source]):
         raise EditorialError("Use only figures supported by the primary source for the card summary.")
     if summary.rstrip("。！？.!?") == headline.rstrip("。！？.!?"):
         raise EditorialError("Use the card summary to add a detail, or return null.")
@@ -113,8 +118,7 @@ def validate(reply: dict, groups: dict, evidence: dict, day: str, *, include_car
             raise EditorialError("Use single-line Traditional Chinese headlines without links, bullets, markup or mentions.")
         if len(headline) > MAX_EDITORIAL_HEADLINE:
             raise EditorialError(f"Keep the opening main clause in each headline and use at most {MAX_EDITORIAL_HEADLINE} characters.")
-        source_text = json.dumps(evidence[event], ensure_ascii=False)
-        if not numbers(headline) <= numbers(source_text):
+        if not numbers(headline) <= evidence_numbers(evidence[event]):
             raise EditorialError("Copy figures exactly from the selected event or omit them.")
         summary = validate_summary(item["summary"], evidence[event][0], headline) if include_cards else None
         selected.append(SelectedStory(headline, group, summary))
@@ -135,7 +139,11 @@ def write_draft(
     for group in group_stories(result["candidates"]):
         if any(used & story_keys(item) for item in group):
             continue
-        group = [item for item in group if item["section"] == "latest" or (item["source"] == DAILY_PAPERS and item.get("upvotes", 0) >= 100)]
+        group = [
+            item for item in group
+            if item["section"] == "latest" or item["source"] == DAIR_AI_PAPERS.name
+            or (item["source"] == DAILY_PAPERS and item.get("upvotes", 0) >= 100)
+        ]
         if not group:
             continue
         extracts = [source_evidence(item, reader) for item in group[:3]]

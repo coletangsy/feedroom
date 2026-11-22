@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from http.client import IncompleteRead
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -10,7 +11,9 @@ from feedroom.collector import (
     TLDR_AI_FEED,
     canonical_url,
     collect,
+    fetch as fetch_source,
     hn_entries,
+    item_id,
     load_state,
     paper_candidates,
     save_seen,
@@ -22,6 +25,9 @@ from feedroom.collector import (
 
 
 class NewsCollectorTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch("feedroom.collector.dair_entries", return_value=[]))
+
     def test_curated_feeds_include_tldr_and_have_unique_urls(self):
         feeds = {feed.name: feed for feed in (*FEEDS, TLDR_AI_FEED)}
 
@@ -101,7 +107,7 @@ class NewsCollectorTests(unittest.TestCase):
             )
         )
 
-    def test_only_popular_daily_papers_can_enter_reading(self):
+    def test_hugging_face_papers_need_at_least_100_upvotes(self):
         now = datetime.now(UTC)
         entries = {
             "OpenAI": [
@@ -192,6 +198,109 @@ class NewsCollectorTests(unittest.TestCase):
                 result = collect(Path(directory) / "seen.json", 36, 40)
         self.assertEqual({item["published_at"] for item in result["candidates"]}, {"2026-09-04", "2026-09-04T13:00:00Z"})
         self.assertTrue(all(item["section"] == "latest" for item in result["candidates"]))
+
+
+class DairPapersTests(unittest.TestCase):
+    now = datetime(2026, 11, 22, tzinfo=UTC)
+    hub = "https://academy.dair.ai/papers"
+    issue = f"{hub}/week/2026-11-09-november-15"
+    archive = b"""
+        <a href="/papers/week/2026-11-09-november-15">Completed issue</a>
+        <a href="/papers/week/2026-11-16-november-22">Current issue</a>
+        <a href="https://example.com/papers/week/2026-11-15-november-21">External link</a>
+        <a href="/papers/week/2026-08-03-august-9">Old issue</a>
+    """
+    cards = b"""
+        <a class="ph-card" href="/papers/model-inference-2611.12345">
+            <h3>Faster Model Inference</h3><p>A research team studied model inference.</p></a>
+        <a class="ph-card" href="/papers/ai-evaluation-2611.12346">
+            <h3>AI &amp; Evaluation</h3><p>A study of <em>agent</em> evaluation.</p></a>
+        <a class="ph-card" href="/papers/technical-report">
+            <h3>Training Report</h3><p>A report on AI training.</p></a>
+    """
+
+    def collect_papers(self, fetch, *, days=90, published_ids=frozenset()):
+        with (
+            TemporaryDirectory() as directory,
+            patch.multiple("feedroom.collector", FEEDS=(), GITHUB_RELEASES=()),
+            patch("feedroom.collector.tldr_entries", return_value=[]),
+            patch("feedroom.collector.hn_entries", return_value=[]),
+            patch("feedroom.collector.fetch", side_effect=fetch),
+        ):
+            return collect(Path(directory) / "seen.json", 36, 40, days, as_of=self.now,
+                           published_ids=published_ids)
+
+    def test_curated_papers_use_completed_week_and_canonical_urls(self):
+        def fetch(url, *, follow_redirects=False):
+            return {self.hub: self.archive, self.issue: self.cards}.get(url, b"[]")
+
+        result = self.collect_papers(fetch)
+        candidates = {item["url"]: item for item in result["candidates"]}
+
+        self.assertEqual(result["collection_errors"], [])
+        self.assertEqual(set(candidates), {
+            "https://arxiv.org/abs/2611.12345", "https://arxiv.org/abs/2611.12346",
+            f"{self.hub}/technical-report",
+        })
+        paper = candidates["https://arxiv.org/abs/2611.12346"]
+        self.assertEqual(paper["title"], "AI & Evaluation")
+        self.assertEqual(paper["summary_or_snippet"], "A study of agent evaluation.")
+        self.assertEqual(paper["source"], "DAIR.AI Papers")
+        self.assertEqual(paper["section"], "reading")
+        self.assertEqual(paper["published_at"], "2026-11-15")
+
+    def test_curated_papers_share_shortlist_and_deduplicate_arxiv_ids(self):
+        rows = [{"paper": {
+            "id": f"2611.{index}", "title": f"Model evaluation {index}",
+            "summary": "Research on inference.", "publishedAt": self.now.isoformat(),
+            "upvotes": 201 if index == 12345 else 200,
+        }} for index in range(12338, 12346)]
+
+        def fetch(url, *, follow_redirects=False):
+            return {self.hub: self.archive, self.issue: self.cards}.get(url, json.dumps(rows).encode())
+
+        used_url = "https://arxiv.org/abs/2611.12346"
+        result = self.collect_papers(fetch, published_ids={item_id(used_url, "")})
+        candidates = result["candidates"]
+        self.assertEqual(len(candidates), 8)
+        self.assertEqual(candidates[0]["url"], "https://arxiv.org/abs/2611.12345")
+        self.assertEqual(candidates[0]["source"], "Hugging Face Daily Papers")
+        self.assertEqual(candidates[1]["url"], f"{self.hub}/technical-report")
+        self.assertEqual(candidates[1]["source"], "DAIR.AI Papers")
+        self.assertEqual(len({item["url"] for item in candidates}), 8)
+        self.assertNotIn(used_url, [item["url"] for item in candidates])
+
+    def test_expired_and_current_issues_are_not_fetched(self):
+        fetches = []
+
+        def fetch(url, *, follow_redirects=False):
+            fetches.append(url)
+            return self.archive if url == self.hub else b"[]"
+
+        result = self.collect_papers(fetch, days=2)
+        self.assertEqual([url for url in fetches if url.startswith(self.hub)], [self.hub])
+        self.assertEqual(result["collection_errors"], [])
+        self.assertEqual(result["candidates"], [])
+
+    def test_dair_issue_failure_preserves_hugging_face_papers(self):
+        rows = [{"paper": {
+            "id": "2611.12345", "title": "Research on inference", "summary": "A method.",
+            "publishedAt": self.now.isoformat(), "upvotes": 112,
+        }}]
+
+        def fetch(url, *, follow_redirects=False):
+            if url == self.issue:
+                return fetch_source(url, follow_redirects=follow_redirects)
+            return self.archive if url == self.hub else json.dumps(rows).encode()
+
+        for error in (TimeoutError("issue timed out"), IncompleteRead(b"partial")):
+            with self.subTest(error=error), patch("feedroom.collector.urllib.request.build_opener") as opener:
+                response = opener.return_value.open.return_value.__enter__.return_value
+                response.read.side_effect = error
+                result = self.collect_papers(fetch)
+
+                self.assertEqual(result["candidates"][0]["source"], "Hugging Face Daily Papers")
+                self.assertEqual(result["collection_errors"], [{"source": "DAIR.AI Papers", "error": str(error)}])
 
 
 if __name__ == "__main__":

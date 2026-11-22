@@ -115,7 +115,7 @@ Compose 用 `threads-state` volume 保存 `/data/threads.sqlite3`。每日發佈
 
 ## 來源與選題
 
-`feedroom collect` 收集、正規化、評分和去重，並輸出 JSON。`latest` 收錄最近 36 小時的新聞、文章和 releases。`reading` 從 Hugging Face Daily Papers 回看 90 日，收錄至少 100 個 upvote 的論文，並連到原文摘要。收集時排除參考時間之後發佈的內容。 [Hugging Face Daily Papers API](https://huggingface.co/docs/huggingface_hub/main/en/package_reference/hf_api#huggingface_hub.HfApi.list_daily_papers)
+`feedroom collect` 收集、正規化、評分和去重，並輸出 JSON。`latest` 收錄最近 36 小時的新聞、文章和 releases。`reading` 預設回看 90 日，收錄 Hugging Face Daily Papers 上至少有 100 個 upvote 的論文，並檢查 DAIR.AI 最近一期涵蓋期已完結的週刊。兩個來源的論文以 arXiv 連結去重，最多共八篇候選。清單會為合資格的 DAIR.AI 論文預留一個位置。 [Hugging Face Daily Papers API](https://huggingface.co/docs/huggingface_hub/main/en/package_reference/hf_api#huggingface_hub.HfApi.list_daily_papers) · [DAIR.AI Papers](https://academy.dair.ai/papers)
 
 撰稿前會合併同一事件的報道，並嘗試補讀已配置來源的文章正文。補讀遵守 `robots.txt`，遇到封鎖或正文太短時沿用來源摘要。OpenRouter 根據每組事件的證據撰寫短標題，程式核對事件 ID、數字、格式和字數。收集失敗的來源會記錄在 `collection_errors`，其餘來源繼續收集。
 

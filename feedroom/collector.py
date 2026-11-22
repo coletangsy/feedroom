@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
+from http.client import HTTPException
 from pathlib import Path
 from typing import Any
 
@@ -88,6 +89,7 @@ FEEDS = (
 )
 TLDR_AI_FEED = Feed("TLDR AI", "https://tldr.tech/api/rss/ai", 2)
 DAILY_PAPERS = "Hugging Face Daily Papers"
+DAIR_AI_PAPERS = Feed("DAIR.AI Papers", "https://academy.dair.ai/papers", 3)
 GITHUB_RELEASES = (
     ("vLLM", "vllm-project/vllm"),
     ("Hugging Face Transformers", "huggingface/transformers"),
@@ -161,8 +163,11 @@ def fetch(url: str, *, follow_redirects: bool = True) -> bytes:
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json, application/atom+xml, application/rss+xml, text/xml, text/html, */*"})
     open_url = urllib.request.urlopen if follow_redirects else urllib.request.build_opener(NoRedirect()).open
     limit = 8_000_000
-    with open_url(request, timeout=20) as response:
-        content = response.read(limit + 1)
+    try:
+        with open_url(request, timeout=20) as response:
+            content = response.read(limit + 1)
+    except HTTPException as error:
+        raise OSError(str(error)) from error
     if content.startswith(b"\x1f\x8b"):
         with gzip.GzipFile(fileobj=io.BytesIO(content)) as compressed:
             content = compressed.read(limit + 1)
@@ -236,6 +241,47 @@ def tldr_entries(cutoff: datetime, errors: list[dict[str, str]], as_of: datetime
         for article in articles:
             article["published_at"] = issue["published_at"]
             entries.append(article)
+    return entries
+
+
+def dair_entries(cutoff: datetime, as_of: datetime) -> list[dict[str, str]]:
+    archive = fetch(DAIR_AI_PAPERS.url, follow_redirects=False).decode("utf-8")
+    weeks = set()
+    for path, start_date, month, day in re.findall(
+        r"""<a\b[^>]*\shref=["'](/papers/week/(\d{4}-\d{2}-\d{2})-([a-z]+)-(\d{1,2}))["']""",
+        archive,
+    ):
+        try:
+            start = datetime.fromisoformat(start_date).date()
+            end = datetime.strptime(f"{start.year} {month} {day}", "%Y %B %d").date()
+            if end < start:
+                end = end.replace(year=end.year + 1)
+        except ValueError:
+            continue
+        if 0 <= (end - start).days <= 7:
+            weeks.add((end, path))
+    if not weeks:
+        raise ValueError("No DAIR.AI weekly issues found.")
+    issue = max((week for week in weeks if cutoff.date() <= week[0] < as_of.date()), default=None)
+    if issue is None:
+        return []
+    end, path = issue
+    url = urllib.parse.urljoin(DAIR_AI_PAPERS.url, path)
+    page = fetch(url, follow_redirects=False).decode("utf-8")
+    entries = []
+    for path, card in re.findall(
+        r"""<a\b[^>]*\shref=["'](/papers/[\w][\w.-]*)["'][^>]*>(.*?)</a>""", page, re.S,
+    ):
+        heading = re.search(r"<h3\b[^>]*>(.*?)</h3>", card, re.S)
+        paragraph = re.search(r"<p\b[^>]*>(.*?)</p>", card, re.S)
+        title = clean_text(heading[1]) if heading else ""
+        summary = clean_text(paragraph[1]) if paragraph else ""
+        if title and summary:
+            arxiv = re.search(r"-(\d{4}\.\d{4,5})(?:v\d+)?$", path)
+            url = f"https://arxiv.org/abs/{arxiv[1]}" if arxiv else urllib.parse.urljoin(DAIR_AI_PAPERS.url, path)
+            entries.append({"title": title, "url": url, "summary": summary, "published_at": end.isoformat()})
+    if not entries:
+        raise ValueError(f"No paper summaries found for DAIR.AI issue ending {end}.")
     return entries
 
 
@@ -449,6 +495,15 @@ def collect(
             errors.append({"source": name, "error": str(error)[:300]})
 
     raw_candidates.extend(paper_candidates(reading_cutoff, now, errors))
+    try:
+        for entry in dair_entries(reading_cutoff, now):
+            title, url, summary = entry["title"], entry["url"], entry["summary"]
+            score = score_reading_item(title, url, summary, DAIR_AI_PAPERS.weight) or 4
+            item = candidate(DAIR_AI_PAPERS.name, title, url, entry["published_at"], summary, score, section="reading")
+            if item:
+                raw_candidates.append(item)
+    except (OSError, ValueError) as error:
+        errors.append({"source": DAIR_AI_PAPERS.name, "error": str(error)[:300]})
     deduplicated: list[dict[str, Any]] = []
     known_titles: set[str] = set()
     known_ids: set[str] = set()
@@ -459,10 +514,13 @@ def collect(
         known_ids.add(item["id"])
         deduplicated.append(item)
     latest = [item for item in deduplicated if item["section"] == "latest"]
-    reading = [
+    eligible_reading = [
         item for item in deduplicated
         if item["section"] == "reading" and published_ids.isdisjoint((item["id"], item["title_id"]))
-    ][:8]
+    ]
+    curated = [item for item in eligible_reading if item["source"] == DAIR_AI_PAPERS.name]
+    popular = [item for item in eligible_reading if item["source"] != DAIR_AI_PAPERS.name]
+    reading = [*popular[:1], *curated[:1], *popular[1:], *curated[1:]][:8]
     ordered: list[dict[str, Any]] = []
     for index in range(max(len(latest), len(reading))):
         if index < len(latest):

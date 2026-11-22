@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added DAIR.AI Papers of the Week to the daily digest's reading candidates, with cross-source arXiv deduplication.
 - Added explicit Threads card publishing with a dedicated private R2 bucket, Hong Kong date folders and short-lived image URLs.
 - Added an opt-in preview that renders one 1080 × 1350 news card per selected Threads headline, with a source-grounded summary and a fixture for Docker or local replays.
 

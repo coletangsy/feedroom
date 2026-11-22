@@ -43,6 +43,46 @@ def editorial(*headlines):
 
 
 class WriterTests(TestCase):
+    def test_curated_paper_reaches_editorial_draft_and_card(self):
+        paper = candidate("DAIR.AI Papers", "Evaluating agent memory", "https://arxiv.org/abs/2611.12346",
+                          "2026-11-15", "A study of agent memory.", 7, section="reading")
+        reply = {"items": [{"event_id": "E1", "headline": "研究團隊評估代理記憶", "summary": None}]}
+        with (
+            patch.object(ArticleReader, "text", return_value=""),
+            patch("feedroom.writer.complete", return_value=reply) as model,
+        ):
+            draft = write_draft(collected(paper), set(), include_cards=True)
+
+        source = model.call_args.args[0]["events"][0]["sources"][0]
+        self.assertEqual(source["publisher"], "DAIR.AI Papers")
+        self.assertEqual(source["coverage_end_date"], "2026-11-15")
+        self.assertEqual(draft.source_url, paper["url"])
+        self.assertIsNone(draft.cards[0].source_date)
+
+    def test_weekly_coverage_date_cannot_support_a_paper_headline_or_summary(self):
+        paper = candidate("DAIR.AI Papers", "Evaluating agent memory", "https://arxiv.org/abs/2611.12346",
+                          "2026-11-15", "The team reported 72% accuracy.", 7, section="reading")
+        valid = {"event_id": "E1", "headline": "研究團隊評估代理記憶", "summary": "研究團隊報告準確率有 72%。"}
+        cases = (
+            ("headline", "團隊喺 2026-11-15 發表研究", "selected event"),
+            ("summary", "團隊於 2026-11-15 發表研究。", "primary source"),
+        )
+        for field, dated_text, feedback in cases:
+            with (
+                self.subTest(field=field),
+                patch.object(ArticleReader, "text", return_value=""),
+                patch("feedroom.writer.complete", side_effect=[
+                    {"items": [{**valid, field: dated_text}]},
+                    {"items": [valid]},
+                ]) as model,
+            ):
+                draft = write_draft(collected(paper), set(), include_cards=True)
+
+                self.assertEqual(model.call_count, 2)
+                self.assertIn(feedback, model.call_args.args[1])
+                self.assertEqual(draft.cards[0].headline, valid["headline"])
+                self.assertEqual(draft.cards[0].summary, valid["summary"])
+
     def test_links_come_from_collector_and_duplicate_sources_are_grouped(self):
         with patch("feedroom.writer.complete", return_value=DRAFT) as model:
             result = write_draft(collected(ARTICLE, ALTERNATE, OTHER), set())
