@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added an editorial weekly preview that starts from published daily stories, allows one sourced supplement, and renders ordered weekly cards.
+- Persisted confirmed Threads post IDs before fetching their publication times, so incomplete metadata responses leave the post recorded as published.
 - Added DAIR.AI Papers of the Week to the daily digest's reading candidates, with cross-source arXiv deduplication.
 - Added explicit Threads card publishing with a dedicated private R2 bucket, Hong Kong date folders and short-lived image URLs.
 - Added an opt-in preview that renders one 1080 × 1350 news card per selected Threads headline, with a source-grounded summary and a fixture for Docker or local replays.
@@ -23,6 +25,9 @@
 - Added the `AI Threads` topic tag to daily posts and removed the lead link preview and Feedroom's automatic AI self-disclosure.
 
 ### Fixed
+
+- Kept daily stories whose Threads publication is in the weekly window even when their original articles predate it. Applied the same Hong Kong date rules to live and replayed candidates and filtered supplemental papers before ranking them.
+- Grounded weekly headlines and card copy in the original source linked to each story.
 
 - Removed Feedroom's 5,000-token limit on OpenRouter requests so model reasoning can run beyond that limit and still return a draft.
 - Excluded published papers before capping the reading shortlist for Threads.

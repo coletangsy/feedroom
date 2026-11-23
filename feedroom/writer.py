@@ -26,11 +26,48 @@ class EditorialError(RuntimeError):
     pass
 
 
-def complete(payload: dict, feedback: str | None, *, include_cards: bool = False) -> dict:
+def complete_json(
+    prompt: str,
+    payload: dict,
+    feedback: str | None,
+    *,
+    schema_name: str,
+    schema: dict,
+    missing_error: str = "Set OPENROUTER_API_KEY and OPENROUTER_MODEL to generate a post.",
+    response_error: str = "OpenRouter did not return a readable draft.",
+) -> dict:
+    """Call OpenRouter with one strict JSON schema used by editorial writers."""
+
     token = os.environ.get("OPENROUTER_API_KEY", "").strip()
     model = os.environ.get("OPENROUTER_MODEL", "").strip()
     if not token or not model:
-        raise EditorialError("Set OPENROUTER_API_KEY and OPENROUTER_MODEL to generate a post.")
+        raise EditorialError(missing_error)
+    if feedback:
+        payload = {**payload, "previous_validation_error": feedback}
+    body = {
+        "model": model, "messages": [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+        ],
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {"name": schema_name, "strict": True, "schema": schema},
+        },
+        "provider": {"require_parameters": True, "data_collection": "deny"},
+    }
+    request = Request("https://openrouter.ai/api/v1/chat/completions", json.dumps(body).encode(),
+                      {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, method="POST")
+    try:
+        with build_opener(NoRedirect()).open(request, timeout=90) as response:
+            result = json.load(response)
+            return json.loads(result["choices"][0]["message"]["content"])
+    except HTTPError as error:
+        raise EditorialError(f"OpenRouter returned HTTP {error.code}.") from None
+    except (OSError, KeyError, IndexError, TypeError, ValueError):
+        raise EditorialError(response_error) from None
+
+
+def complete(payload: dict, feedback: str | None, *, include_cards: bool = False) -> dict:
     prompt = files("feedroom").joinpath("prompts/threads.v1.md").read_text(encoding="utf-8")
     item_schema = {
         "type": "object", "additionalProperties": False, "required": ["event_id", "headline"],
@@ -44,26 +81,7 @@ def complete(payload: dict, feedback: str | None, *, include_cards: bool = False
         "type": "object", "additionalProperties": False, "required": ["items"],
         "properties": {"items": {"type": "array", "items": item_schema, "maxItems": MAX_HEADLINES}},
     }
-    if feedback:
-        payload = {**payload, "previous_validation_error": feedback}
-    body = {
-        "model": model, "messages": [
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-        ],
-        "response_format": {"type": "json_schema", "json_schema": {"name": "threads_post", "strict": True, "schema": schema}},
-        "provider": {"require_parameters": True, "data_collection": "deny"},
-    }
-    request = Request("https://openrouter.ai/api/v1/chat/completions", json.dumps(body).encode(),
-                      {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, method="POST")
-    try:
-        with build_opener(NoRedirect()).open(request, timeout=90) as response:
-            result = json.load(response)
-            return json.loads(result["choices"][0]["message"]["content"])
-    except HTTPError as error:
-        raise EditorialError(f"OpenRouter returned HTTP {error.code}.") from None
-    except (OSError, KeyError, IndexError, TypeError, ValueError):
-        raise EditorialError("OpenRouter did not return a readable draft.") from None
+    return complete_json(prompt, payload, feedback, schema_name="threads_post", schema=schema)
 
 
 def numbers(text: str) -> set[str]:

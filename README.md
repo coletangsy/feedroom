@@ -71,6 +71,19 @@ docker run --rm --init --ipc=host --network none \
   feedroom-cards preview --candidates /fixtures/cards.json --cards-dir /output/cards-docker
 ```
 
+### 每週 AI 摘要預覽
+
+`weekly-preview` 以香港時間週一 00:00 至指定截稿時間試排選題。SQLite 紀錄中，實際在期內發佈的日更可以納入，原文早於本週亦可。週報最多三則，其中最多一則可從本週發佈的原文補選。只有日期的來源按香港日曆日比較。缺少 Threads 發佈時間的舊紀錄視為時間未確認。Hacker News 提交時間及 TLDR、DAIR.AI 的週刊日期均無法確認原文日期。
+
+每則故事用一至兩張淡灰綠圖卡。同一故事的圖卡共用主標題和字級，第二張直接補上機制、評測條件或限制。標題和圖卡內容以每則所連結的原文為依據。帖文包含涵蓋日期與原文網址，並在 500 字元內按重要性保留可容納的故事。
+
+設定 `OPENROUTER_API_KEY`、`OPENROUTER_MODEL` 及 `THREADS_ACCOUNT_ID` 後，可用下列指令生成草稿。`--daily-journal` 可指定現有 SQLite 紀錄，CLI 以唯讀模式開啟。加上 `--candidates` 可重播既有的 `feedroom collect` JSON。需要圖卡時提供新的 `--cards-dir`。
+
+```sh
+feedroom weekly-preview --as-of 2026-11-22T18:00:00+08:00 \
+  --daily-journal state/threads.sqlite3 --cards-dir build/weekly-2026-11-22
+```
+
 ### 用 R2 發佈圖卡
 
 本機可以用 `publish --with-cards` 發佈當日摘要。Feedroom 會按香港日期把 PNG 放到專用的私人 R2 bucket，路徑為 `threads/YYYY-MM-DD/`。一張圖卡會發成單圖，多張會按摘要順序發成輪播。Meta 透過有效一小時的簽名網址讀取圖卡。 [Threads 輪播文件](https://developers.facebook.com/documentation/threads/posts#carousel-posts) · [R2 簽名網址](https://developers.cloudflare.com/r2/api/s3/presigned-urls/)

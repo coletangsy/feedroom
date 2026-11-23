@@ -5,19 +5,22 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from functools import partial
 import json
+from math import ceil
 import os
 from pathlib import Path
 import re
 import sqlite3
 import sys
 
-from .briefing import CardDraft, select_draft
+from .briefing import CardDraft, Draft, select_draft
 from .card_render import render_cards
-from .collector import add_arguments, collect_from_args
+from .collector import add_arguments, collect, collect_from_args
 from .journal import JournalError, LocalJournal, R2Journal
 from .media import MediaError, R2Media
 from .publishing import deliver
 from .threads import Threads, ThreadsError
+from .weekly import daily_posts, daily_story_references, weekly_groups, weekly_window
+from .weekly_writer import write_weekly_draft
 from .writer import EditorialError, write_draft
 
 
@@ -60,6 +63,37 @@ def open_media() -> R2Media:
     return R2Media(r2_client("FEEDROOM_MEDIA_R2"), bucket)
 
 
+def preview_output(result: dict, draft: Draft | None, cards_dir: Path | None, *, weekly: bool = False) -> dict:
+    output = {"status": "draft" if draft else "collection_incomplete" if result["collection_errors"] else "no_story",
+              "draft": asdict(draft) if draft else None, "collection_errors": result["collection_errors"]}
+    if cards_dir is not None:
+        images = render_cards(draft.cards, cards_dir, weekly=weekly) if isinstance(draft, CardDraft) else ()
+        output["card_images"] = [str(image) for image in images]
+    return output
+
+
+def weekly_preview(args: argparse.Namespace) -> dict:
+    start, cutoff = weekly_window(args.as_of)
+    account = (args.account or "").strip()
+    if not account:
+        raise ValueError("Specify --account or set THREADS_ACCOUNT_ID to read the daily journal.")
+    posts = daily_posts(args.daily_journal, account)
+    listed_daily_links = None
+    if args.candidates:
+        result = json.loads(args.candidates.read_text(encoding="utf-8"))
+    else:
+        hours = ceil((cutoff - start).total_seconds() / 3600)
+        keys, _ = daily_story_references(posts, start, cutoff)
+        result = collect(None, hours, 150, reading_lookback_days=7, include_aggregators=False, as_of=cutoff,
+                         week_start=start, daily_keys=keys)
+        listed_daily_links = result["listed_daily_links"]
+    groups = weekly_groups(result["candidates"], posts, start, cutoff, listed_daily_links=listed_daily_links)
+    draft = write_weekly_draft(groups, start=start, cutoff=cutoff)
+    output = preview_output(result, draft, args.cards_dir, weekly=True)
+    output["coverage"] = {"start": start.isoformat(), "cutoff": cutoff.isoformat()}
+    return output
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -72,22 +106,27 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--editorial", action="store_true", help="Write and validate a Cantonese headline digest through OpenRouter.")
         if name == "publish":
             command.add_argument("--with-cards", action="store_true", help="Render and publish news cards via a private R2 media bucket.")
+    weekly = commands.add_parser("weekly-preview", help="Preview a Cantonese weekly digest and optional PNG cards.")
+    weekly.add_argument("--as-of", required=True, help="Cutoff as an ISO timestamp with a time zone.")
+    weekly.add_argument("--account", default=os.environ.get("THREADS_ACCOUNT_ID"), help="Account in the daily SQLite journal.")
+    weekly.add_argument("--daily-journal", type=Path, default=Path(os.environ.get("FEEDROOM_STATE_DB", "state/threads.sqlite3")),
+                        help="Read the daily SQLite journal without updating it.")
+    weekly.add_argument("--candidates", type=Path, help="Read an existing collector JSON file.")
+    weekly.add_argument("--cards-dir", type=Path, help="Render weekly PNGs into a new directory.")
     args = parser.parse_args(argv)
 
     try:
+        if args.command in {"preview", "weekly-preview"} and args.cards_dir is not None and os.path.lexists(args.cards_dir):
+            raise FileExistsError(f"Card output directory already exists: {args.cards_dir}")
         if args.command == "collect":
             output = collect_from_args(args)
         elif args.command == "preview":
-            if args.cards_dir is not None and os.path.lexists(args.cards_dir):
-                raise FileExistsError(f"Card output directory already exists: {args.cards_dir}")
             result = json.loads(args.candidates.read_text(encoding="utf-8")) if args.candidates else collect_from_args(args)
             write = write_draft if args.editorial else select_draft
             draft = write(result, set(), include_cards=args.cards_dir is not None)
-            output = {"status": "draft" if draft else "collection_incomplete" if result["collection_errors"] else "no_story",
-                      "draft": asdict(draft) if draft else None, "collection_errors": result["collection_errors"]}
-            if args.cards_dir is not None:
-                images = render_cards(draft.cards, args.cards_dir) if isinstance(draft, CardDraft) else ()
-                output["card_images"] = [str(image) for image in images]
+            output = preview_output(result, draft, args.cards_dir)
+        elif args.command == "weekly-preview":
+            output = weekly_preview(args)
         else:
             now = datetime.now(UTC)
             threads = Threads(required_env("THREADS_ACCESS_TOKEN"), required_env("THREADS_ACCOUNT_ID"))

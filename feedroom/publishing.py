@@ -8,6 +8,7 @@ from time import sleep
 
 from .briefing import HKT, Card
 from .card_render import render_cards
+from .journal import JournalError
 from .threads import ThreadsError
 
 
@@ -77,6 +78,38 @@ def prepare_card_post(journal, threads, media, day: str, posts: dict, revision: 
     journal.write({**posts, day: ready}, revision)
 
 
+def record_publication(journal, threads, day: str, post_id: str) -> None:
+    for _ in range(12):
+        posts, revision = journal.read()
+        saved = posts[day]
+        if saved["status"] == "published" and saved["post_id"] == post_id:
+            if saved.get("published_at"):
+                return
+            break
+        if saved["status"] != "publishing":
+            raise ThreadsError(f"Journal for {day} changed while Threads was publishing.")
+        published = {**saved, "status": "published", "post_id": post_id, "published_at": None}
+        if journal.write({**posts, day: published}, revision):
+            break
+    else:
+        raise ThreadsError(f"Could not save the published post ID for {day}.")
+
+    # The post ID is durable before this optional metadata request.
+    try:
+        published_at = threads.publication_time(post_id)
+        if published_at is None:
+            return
+        for _ in range(12):
+            posts, revision = journal.read()
+            saved = posts[day]
+            if saved["status"] != "published" or saved["post_id"] != post_id or saved.get("published_at"):
+                return
+            if journal.write({**posts, day: {**saved, "published_at": published_at}}, revision):
+                return
+    except (JournalError, ThreadsError):
+        return
+
+
 def deliver(journal, threads, collect, now: datetime, *, write, media=None) -> dict:
     day = now.astimezone(HKT).date().isoformat()
     result = None
@@ -95,8 +128,8 @@ def deliver(journal, threads, collect, now: datetime, *, write, media=None) -> d
                 if cards := post.get("cards"):
                     media_match["media_type"] = "IMAGE" if len(cards) == 1 else "CAROUSEL_ALBUM"
                 post_id = threads.find_post(post["text"], post["prepared_at"], link_attachment=attachment, **media_match)
-                if journal.write({**posts, pending: {**post, "status": "published", "post_id": post_id}}, revision):
-                    return {"status": "reconciled", "day": pending, "post_id": post_id}
+                record_publication(journal, threads, pending, post_id)
+                return {"status": "reconciled", "day": pending, "post_id": post_id}
             elif status in {"ERROR", "EXPIRED"}:
                 if journal.write({**posts, pending: {**post, "status": "failed", "reason": status}}, revision):
                     raise ThreadsError(f"Threads container for {pending} ended in {status}.")
@@ -150,17 +183,7 @@ def deliver(journal, threads, collect, now: datetime, *, write, media=None) -> d
             if not journal.write({**posts, day: {**post, "status": "publishing"}}, revision):
                 continue
             post_id = threads.publish(container_id)
-            for _ in range(12):
-                posts, revision = journal.read()
-                saved = posts[day]
-                if saved["status"] == "published" and saved["post_id"] == post_id:
-                    break
-                if saved["status"] != "publishing":
-                    raise ThreadsError(f"Journal for {day} changed while Threads was publishing.")
-                if journal.write({**posts, day: {**saved, "status": "published", "post_id": post_id}}, revision):
-                    break
-            else:
-                raise ThreadsError(f"Could not save the published post ID for {day}.")
+            record_publication(journal, threads, day, post_id)
             return {"status": "published", "day": day, "post_id": post_id,
                     "collection_errors": result["collection_errors"] if result else []}
         elif post["status"] == "published":
