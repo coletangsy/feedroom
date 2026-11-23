@@ -15,6 +15,8 @@
 
 ### Changed
 
+- Labelled daily news cards with 「每日 AI 摘要」 and styled weekly previews with a pale sage background and a 「每週 AI 摘要」 label.
+- Aligned headlines across paired weekly cards so readers can follow the same story across slides.
 - Shortened Cantonese digest headlines to their opening main clause, with supporting details in the card summary.
 - Limited remote branch cleanup to PRs merged into `main` and documented the local branch cleanup and Docker image rebuild on the scheduled host.
 - Formatted the daily Threads digest as a Hong Kong date followed by five or six headline bullets when the evidence and post length allow. The journal retains each headline's source URL and the deduplication IDs for related coverage.

@@ -48,7 +48,7 @@ docker compose run --rm feedroom preview --editorial
 
 ### 圖卡預覽
 
-`preview --cards-dir` 依帖文清單的順序為每則消息輸出一張 1080 × 1350 px PNG。JSON 的 `draft.text` 是香港日期及標題清單，`draft.cards` 包含相同標題、摘要、來源與原文網址，`card_images` 對應由 `01.png` 開始的圖檔。輸出目錄須是新目錄，重跑可另選目錄。
+`preview --cards-dir` 依帖文清單的順序為每則消息輸出一張 1080 × 1350 px PNG。每張卡頂部標示「每日 AI 摘要」。JSON 的 `draft.text` 是香港日期及標題清單，`draft.cards` 包含相同標題、摘要、來源與原文網址，`card_images` 對應由 `01.png` 開始的圖檔。輸出目錄須是新目錄，重跑可另選目錄。
 
 在 Python 環境安裝 `.[cards]` 及 Chromium 後，可用測試資料重播。範例 JSON 收錄五則虛構消息，預覽毋須憑證。
 

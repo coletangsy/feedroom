@@ -42,7 +42,7 @@ def _metadata(card: Card) -> str:
     return source_markup
 
 
-def _template(card: Card) -> str:
+def _template(card: Card, *, weekly: bool = False) -> str:
     template_path = _asset_path("card.html")
     style_path = _asset_path("cards.css")
     logo_path = _asset_path("untitledagent-ivory-1200.png")
@@ -55,8 +55,11 @@ def _template(card: Card) -> str:
 
     summary = card.summary.strip() if card.summary else ""
     summary_markup = f'<p class="summary">{escape(summary, quote=False)}</p>' if summary else ""
+    edition, edition_label = ("weekly", "每週 AI 摘要") if weekly else ("daily", "每日 AI 摘要")
     return Template(template).substitute(
         styles=styles,
+        edition=edition,
+        edition_label=edition_label,
         metadata=_metadata(card),
         logo_data_uri=f"data:image/png;base64,{logo}",
         headline=escape(card.headline.strip(), quote=False),
@@ -124,7 +127,7 @@ def _render_card(page, markup: str, destination: Path) -> None:
         raise OSError(f"Renderer created an empty image: {destination}")
 
 
-def render_cards(cards: tuple[Card, ...], output_dir: Path) -> tuple[Path, ...]:
+def render_cards(cards: tuple[Card, ...], output_dir: Path, *, weekly: bool = False) -> tuple[Path, ...]:
     """Render one image per card in order and atomically finalize the batch.
 
     ``output_dir`` must not exist. Existing files and batches are never replaced.
@@ -168,7 +171,7 @@ def render_cards(cards: tuple[Card, ...], output_dir: Path) -> tuple[Path, ...]:
                 page.route("**/*", lambda route: route.abort())
                 for index, card in enumerate(cards, 1):
                     destination = temp_dir / f"{index:02d}.png"
-                    _render_card(page, _template(card), destination)
+                    _render_card(page, _template(card, weekly=weekly), destination)
                     paths.append(destination)
             except PlaywrightError as error:
                 card_label = f" {index:02d}" if index else ""
