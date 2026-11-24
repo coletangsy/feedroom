@@ -68,9 +68,14 @@ def preview_day(collected_at: str | None) -> str:
 
 def format_post(headlines: list[str], day: str) -> str | None:
     text = "\n".join([day, *(f"• {headline}" for headline in headlines)])
+    return text if thread_length(text) <= 500 else None
+
+
+def thread_length(text: str) -> int:
+    """Count text as Threads does for symbols while retaining the 500 limit."""
+
     # Meta counts emoji by UTF-8 bytes. Count symbol code points conservatively.
-    length = sum(len(char.encode()) if unicodedata.category(char).startswith("S") else 1 for char in text)
-    return text if length <= 500 else None
+    return sum(len(char.encode()) if unicodedata.category(char).startswith("S") else 1 for char in text)
 
 
 def build_draft(

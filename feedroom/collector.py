@@ -285,7 +285,9 @@ def dair_entries(cutoff: datetime, as_of: datetime) -> list[dict[str, str]]:
     return entries
 
 
-def paper_candidates(cutoff: datetime, as_of: datetime, errors: list[dict[str, str]]) -> list[dict[str, Any]]:
+def paper_candidates(
+    cutoff: datetime, as_of: datetime, errors: list[dict[str, str]], *, filter_dates: bool = True,
+) -> list[dict[str, Any]]:
     start = cutoff.date() - timedelta(days=cutoff.weekday())
     papers = {}
     while start <= as_of.date():
@@ -299,7 +301,9 @@ def paper_candidates(cutoff: datetime, as_of: datetime, errors: list[dict[str, s
                 paper_id = paper.get("id") or ""
                 upvotes = int(paper.get("upvotes") or 0)
                 published = paper.get("publishedAt") or ""
-                if not re.fullmatch(r"\d{4}\.\d{4,5}", paper_id) or upvotes < 100 or not in_window(published, cutoff, as_of):
+                if not re.fullmatch(r"\d{4}\.\d{4,5}", paper_id) or upvotes < 100:
+                    continue
+                if filter_dates and not in_window(published, cutoff, as_of):
                     continue
                 title = clean_text(paper.get("title") or row.get("title"))
                 summary = clean_text(paper.get("summary") or row.get("summary"))
@@ -350,6 +354,25 @@ def in_window(value: str, cutoff: datetime, as_of: datetime) -> bool:
     if value == published.date().isoformat():
         return published.date() >= cutoff.date()
     return published >= cutoff
+
+
+def in_calendar_window(value: str, start: datetime | None, as_of: datetime) -> bool:
+    published = parse_date(value)
+    if published is None:
+        return False
+    if value == published.date().isoformat():
+        return published.date() <= as_of.date() and (start is None or start.date() <= published.date())
+    return published <= as_of and (start is None or start <= published)
+
+
+def matches_daily(item: dict[str, Any], keys: Set[str]) -> bool:
+    return bool(keys) and not keys.isdisjoint((item["id"], title_id(item["title"])))
+
+
+def in_weekly_window(
+    item: dict[str, Any], start: datetime, as_of: datetime, daily_keys: Set[str],
+) -> bool:
+    return in_calendar_window(item["published_at"], None if matches_daily(item, daily_keys) else start, as_of)
 
 
 def candidate(source: str, title: str, url: str, published_at: str, summary: str, score: int, **extra: Any) -> dict[str, Any] | None:
@@ -441,19 +464,20 @@ def selected_ids(path: Path) -> list[str]:
 
 
 def collect(
-    state_path: Path, lookback_hours: int, max_items: int, reading_lookback_days: int = READING_LOOKBACK_DAYS,
-    *, as_of: datetime | None = None, published_ids: Set[str] = frozenset(),
+    state_path: Path | None, lookback_hours: int, max_items: int, reading_lookback_days: int = READING_LOOKBACK_DAYS,
+    *, as_of: datetime | None = None, published_ids: Set[str] = frozenset(), include_aggregators: bool = True,
+    week_start: datetime | None = None, daily_keys: Set[str] = frozenset(),
 ) -> dict[str, Any]:
     now = as_of or datetime.now(UTC)
     cutoff = now - timedelta(hours=lookback_hours)
     reading_cutoff = now - timedelta(days=reading_lookback_days)
-    seen = load_state(state_path, now)
+    seen = load_state(state_path, now) if state_path is not None else set()
     errors: list[dict[str, str]] = []
     raw_candidates: list[dict[str, Any]] = []
 
     def add_feed_entries(feed: Feed, entries: list[dict[str, str]]) -> None:
         for entry in entries:
-            if not in_window(entry["published_at"], cutoff, now):
+            if week_start is None and not in_window(entry["published_at"], cutoff, now):
                 continue
             score = score_item(entry["title"], entry["url"], entry["summary"], feed.weight)
             if score is not None:
@@ -467,67 +491,90 @@ def collect(
         except Exception as error:  # One feed must not prevent the rest of the briefing.
             errors.append({"source": feed.name, "error": str(error)[:300]})
 
-    try:
-        add_feed_entries(TLDR_AI_FEED, tldr_entries(cutoff, errors, now))
-    except Exception as error:
-        errors.append({"source": TLDR_AI_FEED.name, "error": str(error)[:300]})
+    if include_aggregators:
+        try:
+            add_feed_entries(TLDR_AI_FEED, tldr_entries(cutoff, errors, now))
+        except Exception as error:
+            errors.append({"source": TLDR_AI_FEED.name, "error": str(error)[:300]})
 
-    try:
-        entries = hn_entries(cutoff, now)
-        for entry in entries:
-            score = score_item(entry["title"], entry["url"], entry["summary"], 1, hn_points=entry["points"], hn_comments=entry["comments"])
-            if score is not None and in_window(entry["published_at"], cutoff, now):
-                item = candidate("Hacker News", entry["title"], entry["url"], entry["published_at"], entry["summary"], score, section="latest", points=entry["points"], comments=entry["comments"], discussion_url=entry["discussion_url"])
-                if item:
-                    raw_candidates.append(item)
-    except Exception as error:
-        errors.append({"source": "Hacker News", "error": str(error)[:300]})
+        try:
+            entries = hn_entries(cutoff, now)
+            for entry in entries:
+                score = score_item(entry["title"], entry["url"], entry["summary"], 1, hn_points=entry["points"], hn_comments=entry["comments"])
+                if score is not None and in_window(entry["published_at"], cutoff, now):
+                    item = candidate("Hacker News", entry["title"], entry["url"], entry["published_at"], entry["summary"], score, section="latest", points=entry["points"], comments=entry["comments"], discussion_url=entry["discussion_url"])
+                    if item:
+                        raw_candidates.append(item)
+        except Exception as error:
+            errors.append({"source": "Hacker News", "error": str(error)[:300]})
 
     for name, repository in GITHUB_RELEASES:
         try:
             for entry in github_entries(name, repository):
                 score = score_item(entry["title"], entry["url"], entry["summary"], 4, github_release=True)
-                if score is not None and in_window(entry["published_at"], cutoff, now):
+                if score is not None and (week_start is not None or in_window(entry["published_at"], cutoff, now)):
                     item = candidate(name, entry["title"], entry["url"], entry["published_at"], entry["summary"], score, section="latest", tags=["github-release"])
                     if item:
                         raw_candidates.append(item)
         except Exception as error:
             errors.append({"source": name, "error": str(error)[:300]})
 
-    raw_candidates.extend(paper_candidates(reading_cutoff, now, errors))
-    try:
-        for entry in dair_entries(reading_cutoff, now):
-            title, url, summary = entry["title"], entry["url"], entry["summary"]
-            score = score_reading_item(title, url, summary, DAIR_AI_PAPERS.weight) or 4
-            item = candidate(DAIR_AI_PAPERS.name, title, url, entry["published_at"], summary, score, section="reading")
-            if item:
-                raw_candidates.append(item)
-    except (OSError, ValueError) as error:
-        errors.append({"source": DAIR_AI_PAPERS.name, "error": str(error)[:300]})
+    paper_start = reading_cutoff
+    if week_start is not None:
+        # A confirmed daily post can carry a paper over from the previous listing.
+        paper_start = week_start - timedelta(days=7) if daily_keys else week_start
+    raw_candidates.extend(paper_candidates(paper_start, now, errors, filter_dates=week_start is None))
+    if include_aggregators:
+        try:
+            for entry in dair_entries(reading_cutoff, now):
+                title, url, summary = entry["title"], entry["url"], entry["summary"]
+                score = score_reading_item(title, url, summary, DAIR_AI_PAPERS.weight) or 4
+                item = candidate(DAIR_AI_PAPERS.name, title, url, entry["published_at"], summary, score, section="reading")
+                if item:
+                    raw_candidates.append(item)
+        except (OSError, ValueError) as error:
+            errors.append({"source": DAIR_AI_PAPERS.name, "error": str(error)[:300]})
+    listed_daily_links = set()
+    if week_start is not None:
+        listed_daily_links = {item["url"] for item in raw_candidates if matches_daily(item, daily_keys)}
+        raw_candidates = [item for item in raw_candidates if in_weekly_window(item, week_start, now, daily_keys)]
+
+    def rank(item: dict[str, Any]) -> tuple:
+        return (not matches_daily(item, daily_keys), item["section"] != "latest",
+                -item.get("upvotes", 0), -item["score"], item["published_at"])
+
     deduplicated: list[dict[str, Any]] = []
     known_titles: set[str] = set()
     known_ids: set[str] = set()
-    for item in sorted(raw_candidates, key=lambda value: (value["section"] != "latest", -value.get("upvotes", 0), -value["score"], value["published_at"])):
-        if item["id"] in seen or item["id"] in known_ids or item["title_id"] in seen or item["title_id"] in known_titles or item["score"] < 4:
+    for item in sorted(raw_candidates, key=rank):
+        if item["id"] in seen or item["id"] in known_ids or item["title_id"] in seen or item["title_id"] in known_titles:
+            continue
+        if item["score"] < 4 and not matches_daily(item, daily_keys):
             continue
         known_titles.add(item["title_id"])
         known_ids.add(item["id"])
         deduplicated.append(item)
-    latest = [item for item in deduplicated if item["section"] == "latest"]
+    daily = [item for item in deduplicated if matches_daily(item, daily_keys)]
+    other = [item for item in deduplicated if not matches_daily(item, daily_keys)]
+    latest = [item for item in other if item["section"] == "latest"]
     eligible_reading = [
-        item for item in deduplicated
+        item for item in other
         if item["section"] == "reading" and published_ids.isdisjoint((item["id"], item["title_id"]))
     ]
     curated = [item for item in eligible_reading if item["source"] == DAIR_AI_PAPERS.name]
     popular = [item for item in eligible_reading if item["source"] != DAIR_AI_PAPERS.name]
     reading = [*popular[:1], *curated[:1], *popular[1:], *curated[1:]][:8]
-    ordered: list[dict[str, Any]] = []
+    ordered = daily
     for index in range(max(len(latest), len(reading))):
         if index < len(latest):
             ordered.append(latest[index])
         if index < len(reading):
             ordered.append(reading[index])
-    return {"collected_at": now.isoformat().replace("+00:00", "Z"), "lookback_hours": lookback_hours, "reading_lookback_days": reading_lookback_days, "candidates": ordered[:max_items], "collection_errors": errors}
+    result = {"collected_at": now.isoformat().replace("+00:00", "Z"), "lookback_hours": lookback_hours,
+              "reading_lookback_days": reading_lookback_days, "candidates": ordered[:max_items], "collection_errors": errors}
+    if week_start is not None:
+        result["listed_daily_links"] = sorted(listed_daily_links)
+    return result
 
 
 def add_arguments(parser: argparse.ArgumentParser, *, legacy: bool = False, replay: bool = True) -> None:

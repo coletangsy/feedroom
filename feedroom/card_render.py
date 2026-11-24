@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 from html import escape
+from itertools import groupby
 import os
 from pathlib import Path
 import re
@@ -42,7 +43,7 @@ def _metadata(card: Card) -> str:
     return source_markup
 
 
-def _template(card: Card) -> str:
+def _template(card: Card, *, weekly: bool = False) -> str:
     template_path = _asset_path("card.html")
     style_path = _asset_path("cards.css")
     logo_path = _asset_path("untitledagent-ivory-1200.png")
@@ -55,8 +56,11 @@ def _template(card: Card) -> str:
 
     summary = card.summary.strip() if card.summary else ""
     summary_markup = f'<p class="summary">{escape(summary, quote=False)}</p>' if summary else ""
+    edition, edition_label = ("weekly", "每週 AI 摘要") if weekly else ("daily", "每日 AI 摘要")
     return Template(template).substitute(
         styles=styles,
+        edition=edition,
+        edition_label=edition_label,
         metadata=_metadata(card),
         logo_data_uri=f"data:image/png;base64,{logo}",
         headline=escape(card.headline.strip(), quote=False),
@@ -64,16 +68,17 @@ def _template(card: Card) -> str:
     )
 
 
-def _fit_card(page) -> None:
+def _fit_card(page, *, headline_size: int | None = None) -> int:
     """Reduce text sizes until the fixed card has no overflow."""
 
     result = page.evaluate(
         """
-        () => {
+        (headlineSize) => {
           const card = document.querySelector('.card');
           const story = document.querySelector('.story');
           const headline = document.querySelector('.headline');
           const summary = document.querySelector('.summary');
+          const weekly = card.dataset.edition === 'weekly';
           const segmenter = new Intl.Segmenter('zh-HK', { granularity: 'word' });
           headline.replaceChildren(...Array.from(segmenter.segment(headline.textContent), ({ segment }) => {
             if (!/^\\p{Script=Han}{2,}$/u.test(segment)) return document.createTextNode(segment);
@@ -83,7 +88,8 @@ def _fit_card(page) -> None:
             return word;
           }));
           const metadata = card.querySelector('.metadata');
-          const sizes = { headline: 97, summary: summary ? 50 : 0, metadata: 38 };
+          const sizes = { headline: headlineSize ?? 97, summary: summary ? 50 : 0, metadata: 38 };
+          if (headlineSize !== null) headline.style.fontSize = `${headlineSize}px`;
           const cardBox = card.getBoundingClientRect();
           const elements = [card.querySelector('.brand'), story, headline, summary,
             card.querySelector('.brand-mark'), metadata].filter(Boolean);
@@ -97,34 +103,40 @@ def _fit_card(page) -> None:
             if (!contained() && sizes.metadata > 26) {
               sizes.metadata -= 2;
               metadata.style.fontSize = `${sizes.metadata}px`;
-            } else if (sizes.headline > 57) {
+            } else if (headlineSize === null && sizes.headline > 57 && (!weekly || sizes.summary <= 42)) {
               sizes.headline -= 4;
               headline.style.fontSize = `${sizes.headline}px`;
             } else if (summary && sizes.summary > 32) {
               sizes.summary -= 2;
               summary.style.fontSize = `${sizes.summary}px`;
             } else {
-              return false;
+              return null;
             }
           }
-          return true;
+          return sizes.headline;
         }
-        """
+        """,
+        headline_size,
     )
-    if not result:
+    if result is None:
         raise ValueError("Card text does not fit within 1080 × 1350 after font-size adjustment.")
+    return result
 
 
-def _render_card(page, markup: str, destination: Path) -> None:
+def _load_and_fit_card(page, markup: str, *, headline_size: int | None = None) -> int:
     page.set_content(markup, wait_until="load")
     page.evaluate("document.fonts.ready")
-    _fit_card(page)
+    return _fit_card(page, headline_size=headline_size)
+
+
+def _render_card(page, markup: str, destination: Path, *, headline_size: int | None = None) -> None:
+    _load_and_fit_card(page, markup, headline_size=headline_size)
     page.locator(".card").screenshot(path=str(destination), type="png")
     if destination.stat().st_size == 0:
         raise OSError(f"Renderer created an empty image: {destination}")
 
 
-def render_cards(cards: tuple[Card, ...], output_dir: Path) -> tuple[Path, ...]:
+def render_cards(cards: tuple[Card, ...], output_dir: Path, *, weekly: bool = False) -> tuple[Path, ...]:
     """Render one image per card in order and atomically finalize the batch.
 
     ``output_dir`` must not exist. Existing files and batches are never replaced.
@@ -166,10 +178,18 @@ def render_cards(cards: tuple[Card, ...], output_dir: Path) -> tuple[Path, ...]:
                 index = 0
                 page = browser.new_page(viewport={"width": CARD_WIDTH, "height": CARD_HEIGHT}, device_scale_factor=1)
                 page.route("**/*", lambda route: route.abort())
-                for index, card in enumerate(cards, 1):
-                    destination = temp_dir / f"{index:02d}.png"
-                    _render_card(page, _template(card), destination)
-                    paths.append(destination)
+                if weekly:
+                    groups = (group for _, group in groupby(cards, key=lambda card: (card.source_url, card.headline)))
+                else:
+                    groups = ((card,) for card in cards)
+                for group in groups:
+                    markups = [_template(card, weekly=weekly) for card in group]
+                    headline_size = min(_load_and_fit_card(page, markup) for markup in markups) if len(markups) > 1 else None
+                    for markup in markups:
+                        index += 1
+                        destination = temp_dir / f"{index:02d}.png"
+                        _render_card(page, markup, destination, headline_size=headline_size)
+                        paths.append(destination)
             except PlaywrightError as error:
                 card_label = f" {index:02d}" if index else ""
                 raise ValueError(f"Unable to render card{card_label}: {error}") from error

@@ -5,10 +5,13 @@
     <style>$styles</style>
   </head>
   <body>
-    <article class="card">
+    <article class="card" data-edition="$edition">
       <header class="brand">
         <div class="brand-identity">
-          <span class="brand-name">untitledagent</span>
+          <div class="brand-labels">
+            <span class="brand-name">untitledagent</span>
+            <span class="edition-label">$edition_label</span>
+          </div>
           <div class="metadata">$metadata</div>
         </div>
         <img class="brand-mark" src="$logo_data_uri" alt="">

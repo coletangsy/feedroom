@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added an editorial weekly preview that starts from published daily stories, allows one sourced supplement, and renders ordered weekly cards.
+- Persisted confirmed Threads post IDs before fetching their publication times, so incomplete metadata responses leave the post recorded as published.
 - Added DAIR.AI Papers of the Week to the daily digest's reading candidates, with cross-source arXiv deduplication.
 - Added explicit Threads card publishing with a dedicated private R2 bucket, Hong Kong date folders and short-lived image URLs.
 - Added an opt-in preview that renders one 1080 × 1350 news card per selected Threads headline, with a source-grounded summary and a fixture for Docker or local replays.
@@ -15,12 +17,17 @@
 
 ### Changed
 
+- Labelled daily news cards with 「每日 AI 摘要」 and styled weekly previews with a pale sage background and a 「每週 AI 摘要」 label.
+- Aligned headlines across paired weekly cards so readers can follow the same story across slides.
 - Shortened Cantonese digest headlines to their opening main clause, with supporting details in the card summary.
 - Limited remote branch cleanup to PRs merged into `main` and documented the local branch cleanup and Docker image rebuild on the scheduled host.
 - Formatted the daily Threads digest as a Hong Kong date followed by five or six headline bullets when the evidence and post length allow. The journal retains each headline's source URL and the deduplication IDs for related coverage.
 - Added the `AI Threads` topic tag to daily posts and removed the lead link preview and Feedroom's automatic AI self-disclosure.
 
 ### Fixed
+
+- Kept daily stories whose Threads publication is in the weekly window even when their original articles predate it. Applied the same Hong Kong date rules to live and replayed candidates and filtered supplemental papers before ranking them.
+- Grounded weekly headlines and card copy in the original source linked to each story.
 
 - Removed Feedroom's 5,000-token limit on OpenRouter requests so model reasoning can run beyond that limit and still return a draft.
 - Excluded published papers before capping the reading shortlist for Threads.

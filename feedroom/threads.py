@@ -1,8 +1,10 @@
 """Send two-step publications to the configured Threads account."""
 
+from datetime import datetime
+from http.client import HTTPException
 import json
 import re
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, build_opener
 
@@ -20,6 +22,16 @@ def threads_id(value: object) -> str:
     if not isinstance(value, str) or not re.fullmatch(r"[0-9]{1,40}", value):
         raise ThreadsError("Expected a numeric Threads ID.")
     return value
+
+
+def parse_publication_time(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        timestamp = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return timestamp if timestamp.tzinfo is not None else None
 
 
 class Threads:
@@ -42,7 +54,7 @@ class Threads:
                 payload = json.load(response)
         except HTTPError as error:
             raise ThreadsError(f"Threads API returned HTTP {error.code}.") from None
-        except (OSError, URLError, ValueError):
+        except (OSError, HTTPException, ValueError):
             raise ThreadsError("Threads API response was unavailable or invalid.") from None
         if not isinstance(payload, dict) or "error" in payload:
             raise ThreadsError("Threads API returned an invalid response.")
@@ -79,6 +91,10 @@ class Threads:
     def publish(self, container_id: str) -> str:
         result = self.request(f"{self.account_id}/threads_publish", {"creation_id": threads_id(container_id)}, method="POST")
         return threads_id(result.get("id"))
+
+    def publication_time(self, post_id: str) -> str | None:
+        timestamp = parse_publication_time(self.request(threads_id(post_id), {"fields": "timestamp"}).get("timestamp"))
+        return timestamp.isoformat() if timestamp is not None else None
 
     def status(self, container_id: str) -> str:
         return self.request(threads_id(container_id), {"fields": "status"}).get("status", "")

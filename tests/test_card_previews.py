@@ -6,12 +6,23 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from feedroom.briefing import select_draft
+from feedroom.card_render import _template
 from feedroom.cli import main
 from feedroom.writer import complete, write_draft
 from test_writer import HEADLINES, collected, daily_stories, editorial
 
 
 class CardPreviewTests(TestCase):
+    def test_card_template_labels_daily_and_weekly_editions(self):
+        draft = select_draft(collected(*daily_stories(1)), set(), include_cards=True)
+        (card,) = draft.cards
+        daily = _template(card)
+        weekly = _template(card, weekly=True)
+        self.assertIn('<article class="card" data-edition="daily">', daily)
+        self.assertIn('<span class="edition-label">每日 AI 摘要</span>', daily)
+        self.assertIn('<article class="card" data-edition="weekly">', weekly)
+        self.assertIn('<span class="edition-label">每週 AI 摘要</span>', weekly)
+
     def test_five_edited_items_share_one_order_between_text_cards_and_pngs(self):
         stories = daily_stories(5)
         order = [3, 0, 4, 2, 1]

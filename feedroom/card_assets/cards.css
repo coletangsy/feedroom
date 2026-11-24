@@ -33,6 +33,11 @@ body {
   background: var(--paper);
 }
 
+.card[data-edition="weekly"] {
+  --paper: #e7ebdf;
+  --quiet-ink: #3e4b40;
+}
+
 .brand {
   display: flex;
   align-items: flex-start;
@@ -47,8 +52,13 @@ body {
   gap: 17px;
 }
 
+.brand-labels {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
 .brand-name {
-  justify-self: start;
   padding: 9px 18px;
   border-radius: 14px;
   background: var(--ink);
@@ -56,6 +66,13 @@ body {
   font-size: 34px;
   font-weight: 700;
   letter-spacing: -0.035em;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.edition-label {
+  font-size: 42px;
+  font-weight: 700;
   line-height: 1.15;
   white-space: nowrap;
 }
@@ -95,6 +112,12 @@ body {
   object-fit: contain;
 }
 
+.card[data-edition="weekly"] .brand-mark {
+  /* Lift the logo's ivory background to white so it blends into the paper. */
+  filter: brightness(1.18);
+  mix-blend-mode: multiply;
+}
+
 .story {
   display: flex;
   min-height: 0;
@@ -104,6 +127,11 @@ body {
   gap: 43px;
   padding-block: 50px;
   overflow: hidden;
+}
+
+.card[data-edition="weekly"] .story {
+  justify-content: flex-start;
+  padding-block-start: 150px;
 }
 
 .headline,

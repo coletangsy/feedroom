@@ -1,9 +1,10 @@
 """Group duplicate candidates and read a bounded amount of public article text."""
 
+from http.client import HTTPException
 import re
 from time import monotonic, sleep
 from urllib.error import HTTPError
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, build_opener
 from urllib.robotparser import RobotFileParser
 
@@ -44,8 +45,9 @@ def group_stories(candidates: list[dict]) -> list[list[dict]]:
 
 
 class ArticleReader:
-    def __init__(self):
+    def __init__(self, *, follow_article_slash: bool = False):
         self.opener = build_opener(NoRedirect())
+        self.follow_article_slash = follow_article_slash
         self.robots: dict[str, RobotFileParser] = {}
         self.last_request: dict[str, float] = {}
         self.remaining = 8
@@ -62,6 +64,20 @@ class ArticleReader:
                 return b""
             data = response.read(limit + 1)
         return data if len(data) <= limit else b""
+
+    def _article_page(self, url: str, robots: RobotFileParser) -> bytes:
+        limit = 2_000_000
+        try:
+            return self.fetch(url, limit, html_only=True)
+        except HTTPError as error:
+            address = urlsplit(url)
+            if not self.follow_article_slash or error.code not in {301, 302, 307, 308} or address.path.endswith("/"):
+                raise
+            # Collection strips the slash that some publishers require on article URLs.
+            variant = address._replace(path=address.path + "/").geturl()
+            if urljoin(url, error.headers.get("Location", "")) != variant or not robots.can_fetch(USER_AGENT, variant):
+                raise
+            return self.fetch(variant, limit, html_only=True)
 
     def text(self, url: str) -> str:
         address = urlsplit(url)
@@ -82,14 +98,14 @@ class ArticleReader:
                 self.robots[host] = rules
             if not self.robots[host].can_fetch(USER_AGENT, url):
                 return ""
-            page = self.fetch(url, 2_000_000, html_only=True)
+            page = self._article_page(url, self.robots[host])
             article = extract(page, include_comments=False, favor_precision=True) if page else None
             return " ".join((article or "").split())
-        except (OSError, ValueError):
+        except (OSError, HTTPException, ValueError):
             return ""
 
 
-def source_evidence(item: dict, reader: ArticleReader) -> dict:
+def source_evidence(item: dict, reader: ArticleReader, *, excerpt_limit: int = 2500) -> dict:
     snippet = item["summary_or_snippet"].strip()
     article = reader.text(item["url"])
     date_field = "coverage_end_date" if item["source"] == DAIR_AI_PAPERS.name else "source_date"
@@ -98,6 +114,6 @@ def source_evidence(item: dict, reader: ArticleReader) -> dict:
         "title": URL_TEXT.sub("[link]", item["title"]),
         date_field: item["published_at"],
         "snippet": URL_TEXT.sub("[link]", snippet),
-        "article_excerpt": URL_TEXT.sub("[link]", article[:2500]) if len(article) >= 500 else "",
+        "article_excerpt": URL_TEXT.sub("[link]", article[:excerpt_limit]) if len(article) >= 500 else "",
         **({"hugging_face_upvotes": item["upvotes"]} if item.get("upvotes") else {}),
     }

@@ -16,6 +16,13 @@ class ThreadsRecoveryTests(unittest.TestCase):
         self.threads = Threads("synthetic", "11")
         self.threads.opener = Mock()
 
+    def test_reads_the_timestamp_from_the_published_media_id(self):
+        self.threads.opener.open.return_value = _response({"timestamp": "2026-11-22T10:05:00+0000"})
+        self.assertEqual(self.threads.publication_time("33"), "2026-11-22T10:05:00+00:00")
+        request = self.threads.opener.open.call_args.args[0]
+        url = urlsplit(request.full_url)
+        self.assertEqual((request.method, url.path, parse_qs(url.query)), ("GET", "/v1.0/33", {"fields": ["timestamp"]}))
+
     def test_create_sends_the_topic_with_no_link_attachment_or_ai_disclosure(self):
         text = "2026-11-20\n• 研究團隊發佈新模型"
         self.threads.opener.open.return_value = _response({"id": "22"})

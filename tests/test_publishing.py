@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import UTC, datetime, timedelta
+from http.client import IncompleteRead
 import io
 import json
 from pathlib import Path
@@ -37,6 +38,7 @@ class PublishingTests(unittest.TestCase):
         self.threads.account_id = "11"
         self.threads.create.return_value = "22"
         self.threads.publish.return_value = "33"
+        self.threads.publication_time.return_value = None
         self.threads.status.return_value = "FINISHED"
         self.sleep = self.enterContext(patch("feedroom.publishing.sleep"))
 
@@ -89,6 +91,60 @@ class PublishingTests(unittest.TestCase):
         self.assertEqual(post["status"], "published")
         self.assertEqual(self.sleep.call_args_list, [call(30), call(60)])
         self.threads.publish.assert_called_once_with("22")
+
+    def test_daily_journal_uses_the_post_timestamp_after_success(self):
+        self.threads.publication_time = Mock(return_value="2026-11-19T17:09:00+00:00")
+        deliver(self.journal, self.threads, lambda _: result(story()), NOW, write=select_draft)
+        self.assertEqual(self.journal.read()[0][DAY]["published_at"], "2026-11-19T17:09:00+00:00")
+        self.threads.publication_time.assert_called_once_with("33")
+
+    def test_unavailable_post_timestamp_does_not_retry_publication(self):
+        self.threads.publication_time = Mock(side_effect=ThreadsError("Timestamp unavailable"))
+        run = lambda: deliver(self.journal, self.threads, lambda _: result(story()), NOW, write=select_draft)
+        self.assertEqual(run()["status"], "published")
+        self.assertIsNone(self.journal.read()[0][DAY]["published_at"])
+        self.assertEqual(run()["status"], "already_published")
+        self.threads.publish.assert_called_once_with("22")
+
+    def test_truncated_timestamp_response_keeps_confirmed_post(self):
+        client = Threads("fixture-token", "11")
+        self.threads.publication_time.side_effect = client.publication_time
+        for recover in (False, True):
+            with self.subTest(recover=recover):
+                self.journal = LocalJournal(self.path, f"fixture-{recover}")
+                self.threads.publish.reset_mock(side_effect=True)
+                self.threads.status.return_value = "FINISHED"
+                run = lambda: deliver(self.journal, self.threads, lambda _: result(story()), NOW, write=select_draft)
+                if recover:
+                    self.threads.publish.side_effect = ThreadsError("Disconnected after POST")
+                    with self.assertRaisesRegex(ThreadsError, "Disconnected"):
+                        run()
+                    self.threads.status.return_value = "PUBLISHED"
+                    self.threads.find_post.return_value = "33"
+
+                def truncated_read(*_args, **_kwargs):
+                    saved = self.journal.read()[0][DAY]
+                    self.assertEqual((saved["status"], saved["post_id"]), ("published", "33"))
+                    raise IncompleteRead(b'{"timestamp":', 20)
+
+                with patch.object(client.opener, "open", side_effect=truncated_read):
+                    self.assertEqual(run()["status"], "reconciled" if recover else "published")
+                    self.assertIsNone(self.journal.read()[0][DAY]["published_at"])
+                    self.assertEqual(run()["status"], "already_published")
+                self.threads.publish.assert_called_once_with("22")
+
+    def test_known_timestamp_preserves_concurrent_journal_updates(self):
+        def after_confirmation(_post_id):
+            posts, revision = self.journal.read()
+            self.assertEqual(posts[DAY]["status"], "published")
+            self.assertTrue(self.journal.write({**posts, "2026-11-21": {"status": "claimed"}}, revision))
+            return "2026-11-19T17:09:00+00:00"
+
+        self.threads.publication_time.side_effect = after_confirmation
+        delivered = deliver(self.journal, self.threads, lambda _: result(story()), NOW, write=select_draft)
+        self.assertEqual(delivered["post_id"], "33")
+        self.assertEqual(self.journal.read()[0][DAY]["published_at"], "2026-11-19T17:09:00+00:00")
+        self.assertEqual(self.journal.read()[0]["2026-11-21"]["status"], "claimed")
 
     def test_card_digest_creates_children_in_order_and_publishes_only_the_carousel(self):
         lead = story("模型動態", "https://example.com/model")
@@ -248,6 +304,7 @@ class PublishingTests(unittest.TestCase):
             deliver(self.journal, self.threads, collect, NOW + timedelta(days=1), write=select_draft)
         self.threads.status.return_value = "PUBLISHED"
         self.threads.find_post.return_value = "33"
+        self.threads.publication_time = Mock(return_value="2026-11-19T17:02:00+00:00")
         reconciled = deliver(self.journal, self.threads, collect, NOW + timedelta(days=1), write=select_draft)
 
         self.assertEqual(reconciled, {"status": "reconciled", "day": DAY, "post_id": "33"})
@@ -258,6 +315,7 @@ class PublishingTests(unittest.TestCase):
         self.threads.publish.assert_called_once_with("22")
         (posts, _) = self.journal.read()
         self.assertEqual(posts[DAY]["post_id"], "33")
+        self.assertEqual(posts[DAY]["published_at"], "2026-11-19T17:02:00+00:00")
         collect.assert_called_once()
 
     def test_reconciles_a_legacy_journal_entry_with_an_inline_source(self):

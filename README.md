@@ -48,7 +48,7 @@ docker compose run --rm feedroom preview --editorial
 
 ### 圖卡預覽
 
-`preview --cards-dir` 依帖文清單的順序為每則消息輸出一張 1080 × 1350 px PNG。JSON 的 `draft.text` 是香港日期及標題清單，`draft.cards` 包含相同標題、摘要、來源與原文網址，`card_images` 對應由 `01.png` 開始的圖檔。輸出目錄須是新目錄，重跑可另選目錄。
+`preview --cards-dir` 依帖文清單的順序為每則消息輸出一張 1080 × 1350 px PNG。每張卡頂部標示「每日 AI 摘要」。JSON 的 `draft.text` 是香港日期及標題清單，`draft.cards` 包含相同標題、摘要、來源與原文網址，`card_images` 對應由 `01.png` 開始的圖檔。輸出目錄須是新目錄，重跑可另選目錄。
 
 在 Python 環境安裝 `.[cards]` 及 Chromium 後，可用測試資料重播。範例 JSON 收錄五則虛構消息，預覽毋須憑證。
 
@@ -69,6 +69,19 @@ docker run --rm --init --ipc=host --network none \
   --mount "type=bind,source=$PWD/tests/fixtures/card_candidates.json,target=/fixtures/cards.json,readonly" \
   --mount "type=bind,source=$PWD/build,target=/output" \
   feedroom-cards preview --candidates /fixtures/cards.json --cards-dir /output/cards-docker
+```
+
+### 每週 AI 摘要預覽
+
+`weekly-preview` 以香港時間週一 00:00 至指定截稿時間試排選題。SQLite 紀錄中，實際在期內發佈的日更可以納入，原文早於本週亦可。週報最多三則，其中最多一則可從本週發佈的原文補選。只有日期的來源按香港日曆日比較。缺少 Threads 發佈時間的舊紀錄視為時間未確認。Hacker News 提交時間及 TLDR、DAIR.AI 的週刊日期均無法確認原文日期。
+
+每則故事用一至兩張淡灰綠圖卡。同一故事的圖卡共用主標題和字級，第二張直接補上機制、評測條件或限制。標題和圖卡內容以每則所連結的原文為依據。帖文包含涵蓋日期與原文網址，並在 500 字元內按重要性保留可容納的故事。
+
+設定 `OPENROUTER_API_KEY`、`OPENROUTER_MODEL` 及 `THREADS_ACCOUNT_ID` 後，可用下列指令生成草稿。`--daily-journal` 可指定現有 SQLite 紀錄，CLI 以唯讀模式開啟。加上 `--candidates` 可重播既有的 `feedroom collect` JSON。需要圖卡時提供新的 `--cards-dir`。
+
+```sh
+feedroom weekly-preview --as-of 2026-11-22T18:00:00+08:00 \
+  --daily-journal state/threads.sqlite3 --cards-dir build/weekly-2026-11-22
 ```
 
 ### 用 R2 發佈圖卡
