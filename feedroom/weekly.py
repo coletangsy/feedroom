@@ -50,8 +50,8 @@ def has_original_source(item: dict) -> bool:
 def daily_story_references(posts: dict, start: datetime, cutoff: datetime) -> tuple[set[str], set[str]]:
     keys = set()
     links = set()
-    for post in posts.values():
-        if not isinstance(post, dict) or post.get("status") != "published":
+    for key, post in posts.items():
+        if ":" in key or not isinstance(post, dict) or post.get("status") != "published":
             continue
         published_at = parse_publication_time(post.get("published_at"))
         if published_at is None or not start <= published_at <= cutoff:

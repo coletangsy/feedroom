@@ -1,4 +1,4 @@
-"""Coordinate a single public post per account and Hong Kong run day."""
+"""Coordinate a single public post per account, Hong Kong date and slot."""
 
 from dataclasses import asdict
 from datetime import datetime
@@ -8,6 +8,7 @@ from time import sleep
 
 from .briefing import HKT, Card
 from .card_render import render_cards
+from .evidence import arxiv_story_key
 from .journal import JournalError
 from .threads import ThreadsError
 
@@ -43,7 +44,7 @@ def prepare_card_post(journal, threads, media, day: str, posts: dict, revision: 
     if len(cards) == 1 or len(children) < len(cards):
         with TemporaryDirectory() as temp:
             paths = render_cards(cards, Path(temp) / "cards")
-            urls = media.upload(day, paths)
+            urls = media.upload(day.partition(":")[0], paths)
 
     if len(cards) == 1:
         container_id = threads.create_image(
@@ -110,8 +111,31 @@ def record_publication(journal, threads, day: str, post_id: str) -> None:
         return
 
 
-def deliver(journal, threads, collect, now: datetime, *, write, media=None) -> dict:
+def draft_expired(key: str, status: str, day: str) -> bool:
+    return status in {"claimed", "ready"} and key.partition(":")[0] < day
+
+
+def used_story_keys(posts: dict, day: str) -> set[str]:
+    keys = set()
+    for key, post in posts.items():
+        if post["status"] == "failed" or draft_expired(key, post["status"], day):
+            continue
+        related = post.get("related_ids") or ()
+        keys.update(value for value in (post.get("candidate_id"), post.get("title_id"), *related)
+                    if isinstance(value, str) and value)
+        urls = post.get("source_urls") or ()
+        for url in (post.get("source_url"), post.get("link_attachment"), *urls):
+            if isinstance(url, str) and (paper_key := arxiv_story_key(url)):
+                keys.add(paper_key)
+    return keys
+
+
+def deliver(journal, threads, collect, now: datetime, *, write, media=None, slot: str = "daily") -> dict:
+    if slot not in {"daily", "paper", "weekly"}:
+        raise ValueError(f"Unknown publishing slot: {slot}")
     day = now.astimezone(HKT).date().isoformat()
+    # Bare dates are the original daily keys and remain resumable in place.
+    post_key = day if slot == "daily" else f"{day}:{slot}"
     result = None
     draft = None
     written_for = None
@@ -129,29 +153,31 @@ def deliver(journal, threads, collect, now: datetime, *, write, media=None) -> d
                     media_match["media_type"] = "IMAGE" if len(cards) == 1 else "CAROUSEL_ALBUM"
                 post_id = threads.find_post(post["text"], post["prepared_at"], link_attachment=attachment, **media_match)
                 record_publication(journal, threads, pending, post_id)
-                return {"status": "reconciled", "day": pending, "post_id": post_id}
+                if pending == post_key or (slot == "daily" and ":" not in pending):
+                    return {"status": "reconciled", "day": pending.partition(":")[0], "post_id": post_id}
             elif status in {"ERROR", "EXPIRED"}:
-                if journal.write({**posts, pending: {**post, "status": "failed", "reason": status}}, revision):
+                saved = journal.write({**posts, pending: {**post, "status": "failed", "reason": status}}, revision)
+                if saved and pending.partition(":")[2] == post_key.partition(":")[2]:
                     raise ThreadsError(f"Threads container for {pending} ended in {status}.")
             else:
                 raise ThreadsError(f"Publication for {pending} is unresolved. The existing container must be checked before sending again.")
             continue
 
         abandoned = {key: {**post, "status": "failed", "reason": "run_day_ended"}
-                     for key, post in posts.items() if key < day and post["status"] in {"claimed", "ready"}}
+                     for key, post in posts.items()
+                     if draft_expired(key, post["status"], day)}
         if abandoned:
             journal.write({**posts, **abandoned}, revision)
             continue
 
-        post = posts.get(day)
+        post = posts.get(post_key)
         if post and post["status"] in {"claimed", "ready"}:
             if post.get("cards") and media is None:
                 raise ThreadsError(f"Resume the card draft for {day} with publish --with-cards.")
             if not post.get("cards") and media is not None:
                 raise ThreadsError(f"A text draft already exists for {day}. Resolve it before publishing cards.")
         if post is None:
-            used = {key for post in posts.values() if post["status"] != "failed"
-                    for key in (post["candidate_id"], post["title_id"], *post.get("related_ids", []))}
+            used = used_story_keys(posts, day)
             if used != written_for:
                 result = collect(used)
                 draft = write(result, used, day=day)
@@ -160,30 +186,30 @@ def deliver(journal, threads, collect, now: datetime, *, write, media=None) -> d
                 status = "collection_incomplete" if result["collection_errors"] else "no_story"
                 return {"status": status, "day": day, "collection_errors": result["collection_errors"]}
             post = {**asdict(draft), "status": "claimed", "prepared_at": str(int(now.timestamp()))}
-            journal.write({**posts, day: post}, revision)
+            journal.write({**posts, post_key: post}, revision)
         elif post["status"] == "claimed":
             # Concurrent starts can create extra containers. Only the saved one can be published.
             if post.get("cards"):
-                prepare_card_post(journal, threads, media, day, posts, revision)
+                prepare_card_post(journal, threads, media, post_key, posts, revision)
                 continue
             container_id = threads.create(post["text"], topic_tag="AI Threads")
             ready = {**post, "status": "ready", "container_id": container_id, "link_attachment": None}
-            journal.write({**posts, day: ready}, revision)
+            journal.write({**posts, post_key: ready}, revision)
         elif post["status"] == "ready":
             container_id = post["container_id"]
             status = wait_for_containers(threads, container_id)
             if status in {"ERROR", "EXPIRED"}:
-                if journal.write({**posts, day: {**post, "status": "failed", "reason": status}}, revision):
+                if journal.write({**posts, post_key: {**post, "status": "failed", "reason": status}}, revision):
                     raise ThreadsError(f"Threads container for {day} ended in {status}.")
                 continue
             if status != "FINISHED":
                 if journal.read()[1] != revision:
                     continue
                 raise ThreadsError(f"Threads container for {day} is not ready to publish.")
-            if not journal.write({**posts, day: {**post, "status": "publishing"}}, revision):
+            if not journal.write({**posts, post_key: {**post, "status": "publishing"}}, revision):
                 continue
             post_id = threads.publish(container_id)
-            record_publication(journal, threads, day, post_id)
+            record_publication(journal, threads, post_key, post_id)
             return {"status": "published", "day": day, "post_id": post_id,
                     "collection_errors": result["collection_errors"] if result else []}
         elif post["status"] == "published":

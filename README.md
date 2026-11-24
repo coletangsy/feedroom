@@ -102,7 +102,7 @@ docker compose --profile cards build feedroom-cards
 docker compose --profile cards run --rm feedroom-cards publish --with-cards
 ```
 
-兩種發佈方式共用同一份發佈紀錄。同一香港日期已有發佈紀錄時，指令回傳 `already_published`。日常排程使用 `feedroom publish` 發佈純文字。圖卡指令可以重用已確認的圖片容器，繼續未完成的輪播。若 Threads 將已保存的貼文容器標為 `ERROR` 或 `EXPIRED`，須先核對當日發佈紀錄。
+兩種日更發佈方式共用同一時段的紀錄。同一香港日期已發佈日更時，指令回傳 `already_published`。日常排程使用 `feedroom publish` 發佈純文字。圖卡指令可以重用已確認的圖片容器，繼續未完成的輪播。若 Threads 將已保存的貼文容器標為 `ERROR` 或 `EXPIRED`，須先核對當日發佈紀錄。
 
 ### Threads 帳戶與試帖
 
@@ -114,17 +114,31 @@ docker compose --profile cards run --rm feedroom-cards publish --with-cards
 docker compose run --rm feedroom publish
 ```
 
-發佈會先核對 token 帳戶，並以執行當日的香港日期撰稿。草稿通過驗證後，程式建立附有主題標籤的純文字 Threads container，省略連結附件與 AI 自我揭露欄位，待它就緒才發佈。Meta 仍可自行加上 AI 標籤。當日已有帖文會回傳 `already_published`，無合適消息則跳過。若發佈回應中斷，重跑會先查原 container 和帳戶帖文。狀態仍不明時會暫停新發佈。 [Meta 發佈流程](https://developers.facebook.com/documentation/threads/posts) · [Meta 發佈狀態](https://developers.facebook.com/documentation/threads/troubleshooting)
+發佈會先核對 token 帳戶，並以執行當日的香港日期撰稿。草稿通過驗證後，程式建立附有主題標籤的純文字 Threads container，省略連結附件與 AI 自我揭露欄位，待它就緒才發佈。Meta 仍可自行加上 AI 標籤。同一時段已有帖文會回傳 `already_published`，無合適消息則跳過。若發佈回應中斷，重跑會先查原 container 和帳戶帖文。狀態仍不明時會暫停新發佈。 [Meta 發佈流程](https://developers.facebook.com/documentation/threads/posts) · [Meta 發佈狀態](https://developers.facebook.com/documentation/threads/troubleshooting)
+
+### 下午「今日讀一篇」
+
+日更收集後會把 `reading` 清單保存在 Compose 的 `threads-state` volume。下午優先用同一帳戶、同一香港日期的清單，按原有排序找一篇能讀到 arXiv 原文摘要的論文。清單缺失、過期或沒有合適論文時，會重新收集 Hugging Face Daily Papers 和 DAIR.AI。可從任一來源選題，但原文連結必須指向 arXiv 論文頁。發佈時按帳戶歷史排除已刊出的論文，沒有合資格論文便跳過。
+
+先用 Docker 預覽並核對選題、粵語摘要、原文連結和字數。預覽需要 OpenRouter 設定。若已配置 `THREADS_ACCOUNT_ID`，預覽會嘗試讀取該帳戶的候選快照，並唯讀核對已配置的 SQLite 或 R2 發佈紀錄。輸出的 `candidate_source` 會標示用快照 `cached` 或重新收集 `fresh`。
+
+```sh
+docker compose --env-file .env build feedroom
+docker compose --env-file .env run --rm feedroom paper-preview
+```
+
+確認預覽後，用下文同一主機、Docker context、Compose project 和 `.env` 排程執行 `feedroom paper-publish`，讓日更和下午任務共用快照及發佈紀錄。
 
 ### 每日排程與發佈紀錄
 
-試帖確認後，由本機主機排程每日呼叫 Compose，並保留輸出及錯誤紀錄。排程時主機需開機，Docker 服務需已啟動。以下是 UTC 主機在香港時間 08:00 執行的 cron 範例。使用其他主機時區請換算時間，並換入實際 checkout 和 Docker 路徑。
+試帖確認後，由本機主機排程每日呼叫 Compose，並保留輸出及錯誤紀錄。排程時主機需開機，Docker 服務需已啟動。以下是 UTC 主機的 cron 範例，日更為香港時間 08:00，論文為香港時間 15:00。下午鐘點可在主機排程中調整，啟用前先核對並避開日更和週日欄目。使用其他主機時區請換算時間，並換入實際 checkout 和 Docker 路徑。
 
 ```cron
 0 0 * * * cd "/absolute/path/to/feedroom" && "/absolute/path/to/docker" compose --env-file .env run --rm feedroom publish
+0 7 * * * cd "/absolute/path/to/feedroom" && "/absolute/path/to/docker" compose --env-file .env run --rm feedroom paper-publish
 ```
 
-Compose 用 `threads-state` volume 保存 `/data/threads.sqlite3`。每日發佈會沿用各標題和合併來源的去重 ID。搬遷主機前先備份 volume，切換排程前先處理未確認的發佈，並確認新環境讀到同一份歷史。每個帳戶只啟用一個每日發佈排程，切換前先停用原有 Codex heartbeat 或其他舊觸發器。
+Compose 用 `threads-state` volume 保存 `/data/threads.sqlite3` 及每個帳戶的 `/data/reading-<帳戶 ID>.json`。每個帳戶在同一香港日期及時段最多發佈一次。搬遷主機前先備份 volume，切換排程前先處理未確認的發佈，並確認新環境讀到同一份歷史。每個帳戶的每個時段只啟用一個觸發器。
 
 ## 來源與選題
 

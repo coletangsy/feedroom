@@ -50,6 +50,8 @@ class WeeklyInputsTests(TestCase):
             "2026-11-20": {"status": "published", "related_ids": [by_id["id"]],
                            "published_at": "2026-11-20T09:01:00+08:00"},
             "2026-11-21": {"status": "failed", "source_urls": [failed["url"]]},
+            "2026-11-21:paper": {"status": "published", "source_urls": [failed["url"]],
+                                 "published_at": "2026-11-21T15:00:00+08:00"},
             "2026-11-22": {"status": "published", "source_urls": [late["url"]],
                            "published_at": "2026-11-22T18:05:00+08:00",
                            "prepared_at": str(int(datetime.fromisoformat("2026-11-22T17:55:00+08:00").timestamp()))},

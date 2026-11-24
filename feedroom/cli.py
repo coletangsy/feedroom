@@ -1,4 +1,4 @@
-"""Collect sources, preview, or publish the daily Threads headline digest."""
+"""Collect sources, preview, or publish Feedroom posts for Threads."""
 
 import argparse
 from dataclasses import asdict
@@ -12,13 +12,14 @@ import re
 import sqlite3
 import sys
 
-from .briefing import CardDraft, Draft, select_draft
+from .briefing import HKT, CardDraft, Draft, select_draft
 from .card_render import render_cards
-from .collector import add_arguments, collect, collect_from_args
+from .collector import add_arguments, collect, collect_from_args, parse_date
 from .journal import JournalError, LocalJournal, R2Journal
 from .media import MediaError, R2Media
-from .publishing import deliver
-from .threads import Threads, ThreadsError
+from .paper import load_reading, save_reading, select_paper, write_paper
+from .publishing import deliver, used_story_keys
+from .threads import Threads, ThreadsError, threads_id
 from .weekly import daily_posts, daily_story_references, weekly_groups, weekly_window
 from .weekly_writer import write_weekly_draft
 from .writer import EditorialError, write_draft
@@ -94,6 +95,39 @@ def weekly_preview(args: argparse.Namespace) -> dict:
     return output
 
 
+def reading_path(account: str) -> Path:
+    state = Path(os.environ.get("FEEDROOM_STATE_DB", "state/threads.sqlite3"))
+    return state.with_name(f"reading-{threads_id(account)}.json")
+
+
+def collect_daily(args: argparse.Namespace, path: Path, used: set[str]) -> dict:
+    result = collect_from_args(args, published_ids=used)
+    try:
+        save_reading(path, result)
+    except OSError as error:
+        print(f"Could not save the reading shortlist: {error}", file=sys.stderr)
+    return result
+
+
+def paper_input(now: datetime, account: str, used: set[str], provided: dict | None = None) -> dict:
+    cached = provided
+    if cached is None and account:
+        cached = load_reading(reading_path(account), now)
+    return select_paper(cached, lambda ids: collect(None, 0, 8, as_of=now, published_ids=ids, reading_only=True),
+                        used, provided=provided is not None)
+
+
+def paper_preview_history(account: str) -> dict:
+    if not account:
+        return {}
+    account = threads_id(account)
+    if os.environ.get("FEEDROOM_R2_BUCKET"):
+        posts, _ = open_journal(account).read()
+        return posts
+    path = Path(os.environ.get("FEEDROOM_STATE_DB", "state/threads.sqlite3"))
+    return daily_posts(path, account) if path.is_file() else {}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -113,6 +147,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="Read the daily SQLite journal without updating it.")
     weekly.add_argument("--candidates", type=Path, help="Read an existing collector JSON file.")
     weekly.add_argument("--cards-dir", type=Path, help="Render weekly PNGs into a new directory.")
+    paper = commands.add_parser("paper-preview", help="Preview today's Cantonese paper post.")
+    paper.add_argument("--as-of", help="Preview as of an ISO date or timestamp.")
+    paper.add_argument("--candidates", type=Path, help="Read a collector JSON file instead of collecting papers.")
+    commands.add_parser("paper-publish", help="Publish the afternoon paper post to the configured Threads account.")
     args = parser.parse_args(argv)
 
     try:
@@ -127,17 +165,34 @@ def main(argv: list[str] | None = None) -> int:
             output = preview_output(result, draft, args.cards_dir)
         elif args.command == "weekly-preview":
             output = weekly_preview(args)
+        elif args.command == "paper-preview":
+            provided = json.loads(args.candidates.read_text(encoding="utf-8")) if args.candidates else None
+            if args.candidates and not isinstance(provided, dict):
+                raise ValueError("--candidates must contain a collector JSON object.")
+            now = parse_date(args.as_of or (provided or {}).get("collected_at"))
+            if args.as_of and now is None:
+                raise ValueError("--as-of must be an ISO date or timestamp.")
+            now = now or datetime.now(UTC)
+            account = os.environ.get("THREADS_ACCOUNT_ID", "").strip()
+            day = now.astimezone(HKT).date().isoformat()
+            used = used_story_keys(paper_preview_history(account), day)
+            result = paper_input(now, account, used, provided)
+            draft = write_paper(result, used, day=day)
+            output = preview_output(result, draft, None)
+            output["candidate_source"] = result["candidate_source"]
         else:
             now = datetime.now(UTC)
             threads = Threads(required_env("THREADS_ACCESS_TOKEN"), required_env("THREADS_ACCOUNT_ID"))
             threads.verify_account()
-            media = open_media() if args.with_cards else None
-            output = deliver(
-                open_journal(threads.account_id), threads,
-                lambda published_ids: collect_from_args(args, published_ids=published_ids), now,
-                write=partial(write_draft, include_cards=True) if media is not None else write_draft,
-                media=media,
-            )
+            media = open_media() if args.command == "publish" and args.with_cards else None
+            journal = open_journal(threads.account_id)
+            if args.command == "paper-publish":
+                output = deliver(journal, threads, lambda used: paper_input(now, threads.account_id, used),
+                                 now, write=write_paper, slot="paper")
+            else:
+                output = deliver(journal, threads, partial(collect_daily, args, reading_path(threads.account_id)), now,
+                                 write=partial(write_draft, include_cards=True) if media is not None else write_draft,
+                                 media=media)
         print(json.dumps(output, ensure_ascii=False, indent=2))
         return int(output.get("status") == "collection_incomplete")
     except (OSError, ValueError, KeyError, TypeError, sqlite3.Error, JournalError, MediaError, ThreadsError, EditorialError) as error:
