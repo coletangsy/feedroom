@@ -274,7 +274,8 @@ class PublishingTests(unittest.TestCase):
         self.assertTrue(self.journal.write(posts, None))
         output = io.StringIO()
         with (
-            patch.dict("os.environ", {"THREADS_ACCESS_TOKEN": "synthetic", "THREADS_ACCOUNT_ID": "11"}, clear=True),
+            patch.dict("os.environ", {"THREADS_ACCESS_TOKEN": "synthetic", "THREADS_ACCOUNT_ID": "11",
+                                      "FEEDROOM_STATE_DB": str(self.path)}, clear=True),
             patch("feedroom.cli.datetime") as clock,
             patch("feedroom.cli.Threads", return_value=self.threads),
             patch("feedroom.cli.open_journal", return_value=self.journal),

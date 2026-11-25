@@ -466,7 +466,7 @@ def selected_ids(path: Path) -> list[str]:
 def collect(
     state_path: Path | None, lookback_hours: int, max_items: int, reading_lookback_days: int = READING_LOOKBACK_DAYS,
     *, as_of: datetime | None = None, published_ids: Set[str] = frozenset(), include_aggregators: bool = True,
-    week_start: datetime | None = None, daily_keys: Set[str] = frozenset(),
+    week_start: datetime | None = None, daily_keys: Set[str] = frozenset(), reading_only: bool = False,
 ) -> dict[str, Any]:
     now = as_of or datetime.now(UTC)
     cutoff = now - timedelta(hours=lookback_hours)
@@ -485,13 +485,13 @@ def collect(
                 if item:
                     raw_candidates.append(item)
 
-    for feed in FEEDS:
+    for feed in (() if reading_only else FEEDS):
         try:
             add_feed_entries(feed, feed_entries(feed))
         except Exception as error:  # One feed must not prevent the rest of the briefing.
             errors.append({"source": feed.name, "error": str(error)[:300]})
 
-    if include_aggregators:
+    if include_aggregators and not reading_only:
         try:
             add_feed_entries(TLDR_AI_FEED, tldr_entries(cutoff, errors, now))
         except Exception as error:
@@ -508,7 +508,7 @@ def collect(
         except Exception as error:
             errors.append({"source": "Hacker News", "error": str(error)[:300]})
 
-    for name, repository in GITHUB_RELEASES:
+    for name, repository in (() if reading_only else GITHUB_RELEASES):
         try:
             for entry in github_entries(name, repository):
                 score = score_item(entry["title"], entry["url"], entry["summary"], 4, github_release=True)

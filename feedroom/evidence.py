@@ -16,10 +16,25 @@ from .http import NoRedirect
 ARTICLE_HOSTS = {urlsplit(feed.url).hostname for feed in (*FEEDS, DAIR_AI_PAPERS)} | {"arxiv.org"}
 STOP_WORDS = {"about", "after", "from", "into", "more", "that", "their", "this", "what", "when", "with", "will", "your"}
 URL_TEXT = re.compile(r"(?:https?://|www\.)[^\s<>]+", re.IGNORECASE)
+ARXIV_PATH = re.compile(r"/(?:abs|pdf|html)/([0-9]{4}\.[0-9]{4,5})(?:v[0-9]+)?(?:\.pdf)?/?")
+
+
+def arxiv_story_key(url: str) -> str | None:
+    try:
+        address = urlsplit(url)
+    except ValueError:
+        return None
+    if address.scheme in {"http", "https"} and address.netloc.lower() in {"arxiv.org", "www.arxiv.org", "export.arxiv.org"}:
+        if match := ARXIV_PATH.fullmatch(address.path):
+            return item_id(f"https://arxiv.org/abs/{match[1]}", "")
+    return None
 
 
 def story_keys(item: dict) -> set[str]:
-    return {item["id"], title_id(item["title"])}
+    keys = {item["id"], title_id(item["title"])}
+    if key := arxiv_story_key(item["url"]):
+        keys.add(key)
+    return keys
 
 
 def group_stories(candidates: list[dict]) -> list[list[dict]]:
@@ -45,16 +60,18 @@ def group_stories(candidates: list[dict]) -> list[list[dict]]:
 
 
 class ArticleReader:
-    def __init__(self, *, follow_article_slash: bool = False):
+    def __init__(self, *, follow_article_slash: bool = False, limit: int = 8):
         self.opener = build_opener(NoRedirect())
         self.follow_article_slash = follow_article_slash
         self.robots: dict[str, RobotFileParser] = {}
         self.last_request: dict[str, float] = {}
-        self.remaining = 8
+        self.remaining = limit
 
     def fetch(self, url: str, limit: int, *, html_only: bool = False) -> bytes:
         host = urlsplit(url).hostname
-        pause = self.last_request.get(host, 0) + 1 - monotonic()
+        rules = self.robots.get(host)
+        delay = rules.crawl_delay(USER_AGENT) if rules else None
+        pause = self.last_request[host] + max(1, delay or 0) - monotonic() if host in self.last_request else 0
         if pause > 0:
             sleep(pause)
         self.last_request[host] = monotonic()
@@ -79,10 +96,10 @@ class ArticleReader:
                 raise
             return self.fetch(variant, limit, html_only=True)
 
-    def text(self, url: str) -> str:
+    def page(self, url: str) -> bytes:
         address = urlsplit(url)
         if not self.remaining or address.scheme != "https" or address.netloc not in ARTICLE_HOSTS:
-            return ""
+            return b""
         host = address.netloc
         self.remaining -= 1
         try:
@@ -97,8 +114,14 @@ class ArticleReader:
                     rules.parse([])
                 self.robots[host] = rules
             if not self.robots[host].can_fetch(USER_AGENT, url):
-                return ""
-            page = self._article_page(url, self.robots[host])
+                return b""
+            return self._article_page(url, self.robots[host])
+        except (OSError, HTTPException, ValueError):
+            return b""
+
+    def text(self, url: str) -> str:
+        try:
+            page = self.page(url)
             article = extract(page, include_comments=False, favor_precision=True) if page else None
             return " ".join((article or "").split())
         except (OSError, HTTPException, ValueError):

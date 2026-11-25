@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added an afternoon 「今日讀一篇」 preview and publisher that reuses the morning reading snapshot, falls back to paper-only collection, deduplicates arXiv paper versions and writes from the original abstract.
 - Added an editorial weekly preview that starts from published daily stories, allows one sourced supplement, and renders ordered weekly cards.
 - Persisted confirmed Threads post IDs before fetching their publication times, so incomplete metadata responses leave the post recorded as published.
 - Added DAIR.AI Papers of the Week to the daily digest's reading candidates, with cross-source arXiv deduplication.
@@ -17,6 +18,7 @@
 
 ### Changed
 
+- Scoped publication claims to account, Hong Kong date and slot while retaining existing daily publication records.
 - Labelled daily news cards with 「每日 AI 摘要」 and styled weekly previews with a pale sage background and a 「每週 AI 摘要」 label.
 - Aligned headlines across paired weekly cards so readers can follow the same story across slides.
 - Shortened Cantonese digest headlines to their opening main clause, with supporting details in the card summary.
