@@ -18,6 +18,7 @@
 
 ### Changed
 
+- Use `feedroom-cards` for versioned cards images and allow the scheduler to select that image with `FEEDROOM_CARDS_IMAGE`.
 - Scoped publication claims to account, Hong Kong date and slot while retaining existing daily publication records.
 - Labelled daily news cards with 「每日 AI 摘要」 and styled weekly previews with a pale sage background and a 「每週 AI 摘要」 label.
 - Aligned headlines across paired weekly cards so readers can follow the same story across slides.

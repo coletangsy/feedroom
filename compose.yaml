@@ -14,6 +14,7 @@ services:
       - threads-state:/data
 
   feedroom-cards:
+    image: ${FEEDROOM_CARDS_IMAGE:-${COMPOSE_PROJECT_NAME}-feedroom-cards:latest}
     extends:
       service: feedroom
     profiles: [cards]

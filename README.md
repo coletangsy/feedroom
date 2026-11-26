@@ -64,11 +64,11 @@ Docker 的 `cards` target 隨附 Chromium 和 Noto CJK 字型。以下使用同�
 
 ```sh
 mkdir -p build
-docker build --target cards -t feedroom-cards .
+docker build --target cards -t feedroom-cards:preview .
 docker run --rm --init --ipc=host --network none \
   --mount "type=bind,source=$PWD/tests/fixtures/card_candidates.json,target=/fixtures/cards.json,readonly" \
   --mount "type=bind,source=$PWD/build,target=/output" \
-  feedroom-cards preview --candidates /fixtures/cards.json --cards-dir /output/cards-docker
+  feedroom-cards:preview preview --candidates /fixtures/cards.json --cards-dir /output/cards-docker
 ```
 
 ### 每週 AI 摘要預覽
@@ -151,8 +151,10 @@ Compose 用 `threads-state` volume 保存 `/data/threads.sqlite3` 及每個帳�
 
 Mac LaunchAgent `local.feedroom.publish` 在香港時間 09:30 用 `desktop-linux`、Compose project `feedroom` 和 `.env` 執行 `feedroom-cards publish --with-cards`。更新前先用 `launchctl print "gui/$(id -u)/local.feedroom.publish"` 確認實際服務，並在發佈工作結束後切換標籤。若另有時段排程使用 `feedroom` 服務，按同一流程更新 `feedroom-feedroom` 的 `runtime` target，並用 `--help` 驗證該服務。
 
+排程主機在 `.env` 設定 `FEEDROOM_CARDS_IMAGE=feedroom-cards:latest`。開發 checkout 則由 Compose project 決定圖卡映像名稱。由舊版遷移時，先將原有 `feedroom-feedroom-cards:latest` 加上 `feedroom-cards:latest` 標籤，再設定 `.env` 和同步排程 checkout。Compose 改用新名稱後會沿用原有映像，直至正式版本通過驗證。
+
 1. 從同步到 `origin/main` 的乾淨排程 checkout 操作。用 `df -h /System/Volumes/Data` 和 `docker --context desktop-linux system df` 檢查 Mac 可用空間、映像及建置快取。有足夠主機空間才建置。若排程日誌顯示 Docker 無法啟動，先檢查 Docker Desktop 的主機日誌和磁碟，再查 Threads。
-2. 選定已發佈的 GitHub Release，並核對 Git tag 指向定版 PR 的合併 SHA。用獨立 worktree 從該 tag 建置，例如 `feedroom-feedroom-cards:v00001`。OCI labels 記錄版本及完整 Git SHA。相同版本的映像可在兩項 label 都相符時重用。先為目前使用的映像加上帶 UTC 時間的回退標籤。首次安裝尚無現用映像時，略過回退標籤。
+2. 選定已發佈的 GitHub Release，並核對 Git tag 指向定版 PR 的合併 SHA。用獨立 worktree 從該 tag 建置，例如 `feedroom-cards:v00001`。OCI labels 記錄版本及完整 Git SHA。相同版本的映像可在兩項 label 都相符時重用。先為目前使用的映像加上帶 UTC 時間的回退標籤。首次安裝尚無現用映像時，略過回退標籤。
 
    ```sh
    version=v00001
@@ -160,7 +162,7 @@ Mac LaunchAgent `local.feedroom.publish` 在香港時間 09:30 用 `desktop-linu
    revision=$(git rev-parse "refs/tags/$version^{commit}")
    release_checkout=$(mktemp -d "${TMPDIR:-/tmp}/feedroom-release.XXXXXX")
    git worktree add --detach "$release_checkout" "$revision"
-   repository=feedroom-feedroom-cards
+   repository=feedroom-cards
    active="${repository}:latest"
    if previous_id=$(docker --context desktop-linux image inspect --format '{{.Id}}' "$active" 2>/dev/null); then
      rollback="${repository}:before-refresh-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -190,7 +192,7 @@ Mac LaunchAgent `local.feedroom.publish` 在香港時間 09:30 用 `desktop-linu
      run --rm --no-deps --pull never -T --interactive=false feedroom-cards --help
    ```
 
-   若 Compose 啟動檢查失敗且有回退映像，把記錄中的回退標籤重新標為 `feedroom-feedroom-cards:latest`，再執行同一個檢查。沿用 `feedroom_threads-state`，其中的發佈歷史可防止重複發帖。完成操作後用 `git worktree remove "$release_checkout"` 移除暫存 checkout。
+   若 Compose 啟動檢查失敗且有回退映像，把記錄中的回退標籤重新標為 `feedroom-cards:latest`，再執行同一個檢查。沿用 `feedroom_threads-state`，其中的發佈歷史可防止重複發帖。完成操作後用 `git worktree remove "$release_checkout"` 移除暫存 checkout。
 
 4. 每次更新後檢查保留狀況。每個有排程的服務保留現用映像及最近兩個不同的已驗證回退映像。清理前核對所有已載入的排程、容器使用的映像和回退紀錄，逐個確認舊標籤後用 `docker --context desktop-linux image rm --no-prune` 移除指定標籤。建置快取獨立檢查，按需另外清理。保留所有專案的 volumes，清理範圍限於已確認的 Feedroom 映像。
 
