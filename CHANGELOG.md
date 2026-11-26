@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [v00001] - 2026-11-26
+
 ### Added
 
 - Added an afternoon 「今日讀一篇」 preview and publisher that reuses the morning reading snapshot, falls back to paper-only collection, deduplicates arXiv paper versions and writes from the original abstract.
@@ -18,6 +20,7 @@
 
 ### Changed
 
+- Use `feedroom-cards` for versioned cards images and allow the scheduler to select that image with `FEEDROOM_CARDS_IMAGE`.
 - Scoped publication claims to account, Hong Kong date and slot while retaining existing daily publication records.
 - Labelled daily news cards with 「每日 AI 摘要」 and styled weekly previews with a pale sage background and a 「每週 AI 摘要」 label.
 - Aligned headlines across paired weekly cards so readers can follow the same story across slides.
@@ -43,6 +46,7 @@
 
 ### Documentation
 
+- Documented the `vXXXXX` release process and the local Docker image policy for versioned builds, pre-activation checks, rollback retention and scoped cleanup.
 - Removed the repository-level briefing skills and routed Feedroom previews through the CLI.
 - Moved daily trigger ownership to the deployment scheduler and documented credential setup, retries, and cutover.
 - Added repository guidance links, a collector and delivery architecture overview, and a changelog on 2026-11-07.
