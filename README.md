@@ -102,7 +102,7 @@ docker compose --profile cards build feedroom-cards
 docker compose --profile cards run --rm feedroom-cards publish --with-cards
 ```
 
-兩種日更發佈方式共用同一時段的紀錄。同一香港日期已發佈日更時，指令回傳 `already_published`。日常排程使用 `feedroom publish` 發佈純文字。圖卡指令可以重用已確認的圖片容器，繼續未完成的輪播。若 Threads 將已保存的貼文容器標為 `ERROR` 或 `EXPIRED`，須先核對當日發佈紀錄。
+兩種日更發佈方式共用同一時段的紀錄。同一香港日期已發佈日更時，指令回傳 `already_published`。Mac 的日更排程使用 `feedroom-cards publish --with-cards`，純文字發佈則用 `feedroom publish`。圖卡指令可以重用已確認的圖片容器，繼續未完成的輪播。若 Threads 將已保存的貼文容器標為 `ERROR` 或 `EXPIRED`，須先核對當日發佈紀錄。
 
 ### Threads 帳戶與試帖
 
@@ -139,6 +139,60 @@ docker compose --env-file .env run --rm feedroom paper-preview
 ```
 
 Compose 用 `threads-state` volume 保存 `/data/threads.sqlite3` 及每個帳戶的 `/data/reading-<帳戶 ID>.json`。每個帳戶在同一香港日期及時段最多發佈一次。搬遷主機前先備份 volume，切換排程前先處理未確認的發佈，並確認新環境讀到同一份歷史。每個帳戶的每個時段只啟用一個觸發器。
+
+### 發版
+
+1. 版本由 `v00001` 起順序遞增。每版從最新 `main` 建立短期的 `release/vXXXXX` 分支，例如 `release/v00001`。本版功能和修正的 PR 以該分支為 base，改動記在 [CHANGELOG.md](CHANGELOG.md) 的 `Unreleased`。
+2. 整批驗收後，把本版的條目移到 `## [v00001] - YYYY-MM-DD` 這類同版本區段，填上實際發版日期。從 release 分支開定版 PR 至 `main`，通過 PR 檢查後合併。
+3. 到 GitHub 核對同名 release PR 的合併 SHA，並確認 [Feedroom checks](.github/workflows/feedroom-checks.yml) 在 `main` 上對該 SHA 的 push 執行成功。把同版本的 Git tag 指向該 SHA，並使用該版 changelog 發佈同名 GitHub Release。重試前核對既有 tag 的 SHA 及 Release 的版本和內容。
+4. 發佈後，按下方流程用該 Git tag 建置及驗證同版本的 Docker 映像。
+
+### 本機 Docker 映像政策
+
+Mac LaunchAgent `local.feedroom.publish` 在香港時間 09:30 用 `desktop-linux`、Compose project `feedroom` 和 `.env` 執行 `feedroom-cards publish --with-cards`。更新前先用 `launchctl print "gui/$(id -u)/local.feedroom.publish"` 確認實際服務，並在發佈工作結束後切換標籤。若另有時段排程使用 `feedroom` 服務，按同一流程更新 `feedroom-feedroom` 的 `runtime` target，並用 `--help` 驗證該服務。
+
+1. 從同步到 `origin/main` 的乾淨排程 checkout 操作。用 `df -h /System/Volumes/Data` 和 `docker --context desktop-linux system df` 檢查 Mac 可用空間、映像及建置快取。有足夠主機空間才建置。若排程日誌顯示 Docker 無法啟動，先檢查 Docker Desktop 的主機日誌和磁碟，再查 Threads。
+2. 選定已發佈的 GitHub Release，並核對 Git tag 指向定版 PR 的合併 SHA。用獨立 worktree 從該 tag 建置，例如 `feedroom-feedroom-cards:v00001`。OCI labels 記錄版本及完整 Git SHA。相同版本的映像可在兩項 label 都相符時重用。先為目前使用的映像加上帶 UTC 時間的回退標籤。首次安裝尚無現用映像時，略過回退標籤。
+
+   ```sh
+   version=v00001
+   git fetch origin tag "$version"
+   revision=$(git rev-parse "refs/tags/$version^{commit}")
+   release_checkout=$(mktemp -d "${TMPDIR:-/tmp}/feedroom-release.XXXXXX")
+   git worktree add --detach "$release_checkout" "$revision"
+   repository=feedroom-feedroom-cards
+   active="${repository}:latest"
+   if previous_id=$(docker --context desktop-linux image inspect --format '{{.Id}}' "$active" 2>/dev/null); then
+     rollback="${repository}:before-refresh-$(date -u +%Y%m%dT%H%M%SZ)"
+     docker --context desktop-linux image tag "$previous_id" "$rollback"
+   fi
+   candidate="${repository}:$version"
+   if ! docker --context desktop-linux image inspect "$candidate" >/dev/null 2>&1; then
+     docker --context desktop-linux build --target cards \
+       --label "org.opencontainers.image.version=$version" \
+       --label "org.opencontainers.image.revision=$revision" --tag "$candidate" "$release_checkout"
+   fi
+   docker --context desktop-linux image inspect \
+     --format '{{.Id}} {{index .Config.Labels "org.opencontainers.image.version"}} {{index .Config.Labels "org.opencontainers.image.revision"}}' "$candidate"
+   ```
+
+3. 確認 OCI labels 分別符合 `$version` 和 `$revision`。先用發佈版本的 fixture 渲染並核對 `card_images` 有五張圖卡。驗證通過後，才更新排程使用的 `latest` 並執行 Compose 啟動檢查。將版本、Git SHA、前後 image ID、回退標籤和驗證結果記錄在 Git 忽略的 `build/docker-images/`。
+
+   ```sh
+   docker --context desktop-linux run --rm --pull never --network none \
+     --mount "type=bind,src=$release_checkout/tests/fixtures/card_candidates.json,dst=/tmp/card-candidates.json,readonly" \
+     "$candidate" preview --candidates /tmp/card-candidates.json --cards-dir /tmp/card-check
+   ```
+
+   ```sh
+   docker --context desktop-linux image tag "$candidate" "$active"
+   docker --context desktop-linux compose -p feedroom --env-file .env --profile cards \
+     run --rm --no-deps --pull never -T --interactive=false feedroom-cards --help
+   ```
+
+   若 Compose 啟動檢查失敗且有回退映像，把記錄中的回退標籤重新標為 `feedroom-feedroom-cards:latest`，再執行同一個檢查。沿用 `feedroom_threads-state`，其中的發佈歷史可防止重複發帖。完成操作後用 `git worktree remove "$release_checkout"` 移除暫存 checkout。
+
+4. 每次更新後檢查保留狀況。每個有排程的服務保留現用映像及最近兩個不同的已驗證回退映像。清理前核對所有已載入的排程、容器使用的映像和回退紀錄，逐個確認舊標籤後用 `docker --context desktop-linux image rm --no-prune` 移除指定標籤。建置快取獨立檢查，按需另外清理。保留所有專案的 volumes，清理範圍限於已確認的 Feedroom 映像。
 
 ## 來源與選題
 

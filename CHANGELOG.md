@@ -43,6 +43,7 @@
 
 ### Documentation
 
+- Documented the `vXXXXX` release process and the local Docker image policy for versioned builds, pre-activation checks, rollback retention and scoped cleanup.
 - Removed the repository-level briefing skills and routed Feedroom previews through the CLI.
 - Moved daily trigger ownership to the deployment scheduler and documented credential setup, retries, and cutover.
 - Added repository guidance links, a collector and delivery architecture overview, and a changelog on 2026-11-07.

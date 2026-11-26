@@ -15,17 +15,17 @@ Use `feedroom collect` to inspect candidate JSON, `feedroom preview` for a sourc
 - Keep runtime journals and credentials out of Git. Use fixtures and a mocked Threads client for automated checks.
 - Run `python3 -m unittest discover -s tests -v` for Python changes and `node --test tests/cloudflare.test.mjs` for Cloudflare scheduler changes.
 
+## Releases
+
+- Use sequential versions starting at `v00001`. Create each short-lived `release/vXXXXX` branch from current `main`. Feature and fix PRs for that release target its release branch and record changes under `Unreleased`.
+- After acceptance, move the release notes into a dated changelog section and merge the release PR to `main`. Publish the same version as a Git tag and GitHub Release only after Feedroom checks pass on the exact merge commit. See the [release procedure](README.md#發版).
+
 ## After a pull request merges into `main`
 
 - Confirm the PR was merged into `main` on GitHub and record its head and merge SHAs. Check the [branch cleanup workflow](.github/workflows/delete-merged-branch.yml) for the remote source branch result. Run `node --test .github/tests/delete-merged-branch.node-test.mjs` when changing that workflow.
 - On the Docker host, check `git status --short --branch` and `git worktree list`. Run `git fetch --prune origin`, switch the scheduled checkout to `main` with `git switch -- main`, and fast-forward it with `git merge --ff-only origin/main`. Confirm the checkout is clean, `HEAD` equals `origin/main`, and the PR merge commit is an ancestor of `HEAD` before rebuilding. Preserve any local changes or commits that prevent this sync and report the blocker.
 - Remove only the merged PR's local branch with `git branch -d` after confirming its tip is in `main`. For a squash or rebase merge, use `git branch -D` only if the local tip exactly matches the verified PR head SHA and the PR merge commit is in `main`. If the branch is checked out in a separate worktree created for this PR, remove that worktree only when it is clean and the branch is verified. Keep any branch with unmerged local commits.
-- Rebuild the `feedroom` image from the synced `main` using the scheduler's Docker context, Compose project, and `.env`. For the local Mac LaunchAgent, run these commands from the scheduled checkout. The `--help` check confirms the rebuilt image starts without publishing. Preserve the `threads-state` volume and report the branch cleanup, build, and checks.
-
-  ```sh
-  docker --context desktop-linux compose -p feedroom --env-file .env build feedroom
-  docker --context desktop-linux compose -p feedroom --env-file .env run --rm --no-deps --pull never feedroom --help
-  ```
+- Deploy from a published release tag after syncing `main`. Read the loaded scheduler's arguments to identify each scheduled Compose service. The Mac LaunchAgent at 09:30 HKT uses `feedroom-cards publish --with-cards`. Follow the [Docker image policy](README.md#本機-docker-映像政策) to build, verify and activate the versioned image. Preserve the `threads-state` volume and report branch cleanup, the release version and SHA, active and rollback image IDs, and verification results.
 
 ## Documentation
 
