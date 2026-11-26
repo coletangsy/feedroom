@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [v00001] - 2026-11-26
+
 ### Added
 
 - Added an afternoon 「今日讀一篇」 preview and publisher that reuses the morning reading snapshot, falls back to paper-only collection, deduplicates arXiv paper versions and writes from the original abstract.
