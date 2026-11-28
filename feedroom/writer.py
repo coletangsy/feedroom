@@ -26,6 +26,10 @@ class EditorialError(RuntimeError):
     pass
 
 
+class _UnsupportedSummaryFigures(EditorialError):
+    pass
+
+
 def complete_json(
     prompt: str,
     payload: dict,
@@ -103,13 +107,16 @@ def validate_summary(value: str | None, source: dict, headline: str) -> str | No
             or UNSAFE_TEXT.search(summary) or SIMPLIFIED.intersection(summary)):
         raise EditorialError(f"Use one or two single-line Traditional Chinese summary sentences up to {MAX_CARD_SUMMARY} characters, or null.")
     if not numbers(summary) <= evidence_numbers([source]):
-        raise EditorialError("Use only figures supported by the primary source for the card summary.")
+        raise _UnsupportedSummaryFigures("Use only figures supported by the primary source for the card summary.")
     if summary.rstrip("。！？.!?") == headline.rstrip("。！？.!?"):
         raise EditorialError("Use the card summary to add a detail, or return null.")
     return summary
 
 
-def validate(reply: dict, groups: dict, evidence: dict, day: str, *, include_cards: bool = False) -> Draft | None:
+def validate(
+    reply: dict, groups: dict, evidence: dict, day: str, *, include_cards: bool = False,
+    omit_unsupported_summaries: bool = False,
+) -> Draft | None:
     if not isinstance(reply, dict) or set(reply) != {"items"} or not isinstance(reply["items"], list):
         raise EditorialError("Return a list of items in the requested JSON format.")
     items = reply["items"]
@@ -138,7 +145,13 @@ def validate(reply: dict, groups: dict, evidence: dict, day: str, *, include_car
             raise EditorialError(f"Keep the opening main clause in each headline and use at most {MAX_EDITORIAL_HEADLINE} characters.")
         if not numbers(headline) <= evidence_numbers(evidence[event]):
             raise EditorialError("Copy figures exactly from the selected event or omit them.")
-        summary = validate_summary(item["summary"], evidence[event][0], headline) if include_cards else None
+        summary = None
+        if include_cards:
+            try:
+                summary = validate_summary(item["summary"], evidence[event][0], headline)
+            except _UnsupportedSummaryFigures as error:
+                if not omit_unsupported_summaries:
+                    raise EditorialError(f"{event}: {error} Return null if the summary cannot be grounded.") from None
         selected.append(SelectedStory(headline, group, summary))
         selected_keys.update(keys)
 
@@ -183,10 +196,11 @@ def write_draft(
         for event, sources in evidence.items()
     ]}
     feedback = None
-    for _ in range(2):
+    for retries_left in (2, 1, 0):
         reply = complete(payload, feedback, include_cards=include_cards)
         try:
-            return validate(reply, groups, evidence, day, include_cards=include_cards)
+            return validate(reply, groups, evidence, day, include_cards=include_cards,
+                            omit_unsupported_summaries=retries_left == 0)
         except EditorialError as error:
             feedback = str(error)
     raise EditorialError(f"Draft failed validation. {feedback}")
