@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [v00002] - 2026-11-28
+
 ### Fixed
 
 - Retry Threads account verification after temporary network failures, including DNS timeouts, before collecting a digest.
