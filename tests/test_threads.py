@@ -1,7 +1,9 @@
 import io
 import json
+import socket
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, call, patch
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
 
 from feedroom.threads import Threads, ThreadsError
@@ -15,6 +17,38 @@ class ThreadsRecoveryTests(unittest.TestCase):
     def setUp(self):
         self.threads = Threads("synthetic", "11")
         self.threads.opener = Mock()
+
+    def test_account_verification_recovers_from_dns_failure(self):
+        self.threads.opener.open.side_effect = [
+            URLError(socket.gaierror(socket.EAI_AGAIN, "temporary DNS failure")),
+            URLError(socket.gaierror(socket.EAI_AGAIN, "temporary DNS failure")),
+            _response({"id": "11"}),
+        ]
+        with patch("feedroom.threads.sleep") as delay:
+            self.threads.verify_account()
+
+        self.assertEqual(delay.call_args_list, [call(2), call(5)])
+        requests = [attempt.args[0] for attempt in self.threads.opener.open.call_args_list]
+        self.assertEqual([(req.method, urlsplit(req.full_url).path) for req in requests], [("GET", "/v1.0/me")] * 3)
+
+    def test_account_verification_stops_after_three_network_failures(self):
+        self.threads.opener.open.side_effect = URLError(socket.gaierror(socket.EAI_AGAIN, "temporary DNS failure"))
+        with (patch("feedroom.threads.sleep"),
+              self.assertRaisesRegex(ThreadsError, "response was unavailable")):
+            self.threads.verify_account()
+        self.assertEqual(self.threads.opener.open.call_count, 3)
+
+    def test_account_verification_does_not_retry_unauthorized(self):
+        self.threads.opener.open.side_effect = HTTPError("https://graph.threads.com/", 401, "Unauthorized", {}, None)
+        with self.assertRaisesRegex(ThreadsError, "HTTP 401"):
+            self.threads.verify_account()
+        self.threads.opener.open.assert_called_once()
+
+    def test_publish_does_not_retry_after_a_lost_response(self):
+        self.threads.opener.open.side_effect = TimeoutError("timed out")
+        with self.assertRaisesRegex(ThreadsError, "response was unavailable"):
+            self.threads.publish("22")
+        self.threads.opener.open.assert_called_once()
 
     def test_reads_the_timestamp_from_the_published_media_id(self):
         self.threads.opener.open.return_value = _response({"timestamp": "2026-11-22T10:05:00+0000"})

@@ -4,6 +4,7 @@ from datetime import datetime
 from http.client import HTTPException
 import json
 import re
+from time import sleep
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, build_opener
@@ -12,6 +13,10 @@ from .http import NoRedirect
 
 
 class ThreadsError(RuntimeError):
+    pass
+
+
+class _ThreadsTransportError(ThreadsError):
     pass
 
 
@@ -54,14 +59,24 @@ class Threads:
                 payload = json.load(response)
         except HTTPError as error:
             raise ThreadsError(f"Threads API returned HTTP {error.code}.") from None
-        except (OSError, HTTPException, ValueError):
-            raise ThreadsError("Threads API response was unavailable or invalid.") from None
+        except (OSError, HTTPException):
+            raise _ThreadsTransportError("Threads API response was unavailable due to a network error.") from None
+        except ValueError:
+            raise ThreadsError("Threads API returned an invalid response.") from None
         if not isinstance(payload, dict) or "error" in payload:
             raise ThreadsError("Threads API returned an invalid response.")
         return payload
 
     def verify_account(self) -> None:
-        actual_id = threads_id(self.request("me", {"fields": "id"}).get("id"))
+        for retry_delay in (2, 5, None):
+            try:
+                account = self.request("me", {"fields": "id"})
+                break
+            except _ThreadsTransportError:
+                if retry_delay is None:
+                    raise
+                sleep(retry_delay)
+        actual_id = threads_id(account.get("id"))
         if actual_id != self.account_id:
             raise ThreadsError("Threads access token does not belong to the configured account.")
 
