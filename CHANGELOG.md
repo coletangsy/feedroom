@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Retry Threads account verification after temporary network failures, including DNS timeouts, before collecting a digest.
+- Allow up to three daily draft attempts. If a card summary still contains unsupported figures on the third attempt, omit that summary and keep the validated headline and card.
+
 ## [v00001] - 2026-11-26
 
 ### Added

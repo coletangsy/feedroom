@@ -107,6 +107,46 @@ class WriterTests(TestCase):
         self.assertNotIn("95%", result.text)
         self.assertIn("selected event", model.call_args.args[1])
 
+    def test_uses_a_valid_card_summary_from_the_third_attempt(self):
+        valid = {"event_id": "E1", "headline": "研究團隊發佈新模型", "summary": "模型準確率有 72%。"}
+        with patch("feedroom.writer.complete", side_effect=[
+            {"items": [{**valid, "headline": "研究團隊指準確率有 95%"}]},
+            {"items": [{**valid, "summary": "模型準確率有 95%。"}]},
+            {"items": [valid]},
+        ]) as model:
+            draft = write_draft(collected(ARTICLE), set(), include_cards=True)
+
+        self.assertEqual(model.call_count, 3)
+        self.assertIn("selected event", model.call_args_list[1].args[1])
+        self.assertIn("E1", model.call_args_list[2].args[1])
+        self.assertEqual(draft.cards[0].summary, valid["summary"])
+
+    def test_omits_only_the_card_summary_that_still_has_unsupported_figures_after_three_attempts(self):
+        reply = {"items": [
+            {"event_id": "E1", "headline": "研究團隊發佈新模型", "summary": "模型準確率有 95%。"},
+            {"event_id": "E2", "headline": "資料庫推出備份工具", "summary": "測試準確率有 95%。"},
+        ]}
+        with patch("feedroom.writer.complete", return_value=reply) as model:
+            draft = write_draft(collected(ARTICLE, OTHER), set(), include_cards=True)
+
+        self.assertEqual(model.call_count, 3)
+        self.assertIn("E1", model.call_args.args[1])
+        self.assertIn("null", model.call_args.args[1])
+        self.assertEqual(draft.text.splitlines()[1:], [
+            "• 研究團隊發佈新模型", "• 資料庫推出備份工具",
+        ])
+        self.assertEqual(draft.source_urls, (ARTICLE["url"], OTHER["url"]))
+        self.assertEqual([card.summary for card in draft.cards], [None, "測試準確率有 95%。"])
+
+    def test_omitting_an_unsupported_summary_still_rejects_an_unsupported_headline(self):
+        reply = {"items": [
+            {"event_id": "E1", "headline": "研究團隊發佈新模型", "summary": "模型準確率有 95%。"},
+            {"event_id": "E2", "headline": "資料庫工具準確率有 72%", "summary": None},
+        ]}
+        with (patch("feedroom.writer.complete", return_value=reply),
+              self.assertRaisesRegex(EditorialError, "selected event")):
+            write_draft(collected(ARTICLE, OTHER), set(), include_cards=True)
+
     def test_retries_long_headlines_and_uses_the_same_short_title_on_the_card(self):
         headline = "研究團隊發佈新模型"
         summary = "研究團隊報告準確率有 72%。"
@@ -164,7 +204,7 @@ class WriterTests(TestCase):
         }]}) as model:
             with self.assertRaises(EditorialError):
                 write_draft(collected(ARTICLE), set())
-            self.assertEqual(model.call_count, 2)
+            self.assertEqual(model.call_count, 3)
             model.reset_mock()
             self.assertIsNone(write_draft(collected(ARTICLE, ALTERNATE), {ALTERNATE["id"]}))
             model.assert_not_called()
